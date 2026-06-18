@@ -13,6 +13,11 @@ function normalize(value) {
 export function buildDiff({ csvRows, mapping, matchKeyFieldId, baserowRows }) {
   const csvHeaders = Object.keys(mapping)
 
+  // Deduped set of actually-mapped field IDs, computed once. Two CSV columns
+  // can point at the same field, and unmapped columns carry an empty value;
+  // both would otherwise waste a comparison on every row.
+  const mappedFieldIds = [...new Set(Object.values(mapping).filter(Boolean))]
+
   const toFieldValues = (csvRow) => {
     const values = {}
     for (const header of csvHeaders) {
@@ -51,7 +56,7 @@ export function buildDiff({ csvRows, mapping, matchKeyFieldId, baserowRows }) {
     matchedBaserowKeys.add(key)
     const changes = {}
     let hasChange = false
-    for (const fieldId of Object.values(mapping)) {
+    for (const fieldId of mappedFieldIds) {
       const newValue = normalize(fieldValues[fieldId])
       const oldValue = normalize(baserowRow[fieldKey(fieldId)])
       if (newValue !== oldValue) {
@@ -84,6 +89,21 @@ export function buildDiff({ csvRows, mapping, matchKeyFieldId, baserowRows }) {
   }
 
   return diffRows
+}
+
+// Returns the set of match-key values that appear on more than one Baserow
+// row. Because the diff pairs rows by key, duplicates are collapsed and a
+// shadowed row can be mislabeled "missing" (and then deleted) — so the UI
+// warns before any destructive commit.
+export function findDuplicateBaserowKeys(baserowRows, matchKeyFieldId) {
+  const seen = new Set()
+  const duplicates = new Set()
+  for (const row of baserowRows) {
+    const key = normalize(row[fieldKey(matchKeyFieldId)])
+    if (seen.has(key)) duplicates.add(key)
+    else seen.add(key)
+  }
+  return [...duplicates]
 }
 
 export function summarizeDiff(diffRows) {

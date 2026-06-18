@@ -23,7 +23,7 @@ function buildActions(diffRows) {
   return actions
 }
 
-export default function StepCommit({ token, tableId, diffRows, mapping }) {
+export default function StepCommit({ token, tableId, diffRows }) {
   const [statuses, setStatuses] = useState({})
   const [running, setRunning] = useState(false)
   const [done, setDone] = useState(false)

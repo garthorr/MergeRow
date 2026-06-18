@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { fetchAllRows, fieldKey } from '../lib/baserow'
-import { buildDiff } from '../lib/diff'
+import { buildDiff, findDuplicateBaserowKeys } from '../lib/diff'
 
 const CATEGORY_STYLES = {
   new: 'bg-emerald-50',
@@ -33,6 +33,7 @@ export default function StepDiff({
 }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [duplicateKeys, setDuplicateKeys] = useState([])
 
   useEffect(() => {
     let cancelled = false
@@ -42,6 +43,7 @@ export default function StepDiff({
       try {
         const baserowRows = await fetchAllRows(token, tableId)
         if (cancelled) return
+        setDuplicateKeys(findDuplicateBaserowKeys(baserowRows, matchKeyFieldId))
         const rows = buildDiff({ csvRows, mapping, matchKeyFieldId, baserowRows })
         setDiffRows(rows)
       } catch (err) {
@@ -85,6 +87,16 @@ export default function StepDiff({
 
   return (
     <div className="space-y-4">
+      {duplicateKeys.length > 0 && (
+        <div className="rounded-md bg-amber-50 border border-amber-300 px-4 py-3 text-sm text-amber-800">
+          <span className="font-semibold">Warning:</span> {duplicateKeys.length} duplicate match-key
+          value{duplicateKeys.length === 1 ? '' : 's'} found in Baserow (e.g.{' '}
+          <span className="font-mono">{duplicateKeys.slice(0, 3).join(', ')}</span>
+          {duplicateKeys.length > 3 ? ', …' : ''}). Rows sharing a key are collapsed, so the diff
+          and any deletions may not reflect every row. Pick a unique field as the match key.
+        </div>
+      )}
+
       <div className="flex gap-4 text-xs">
         {Object.entries(CATEGORY_LABELS).map(([key, label]) => (
           <span key={key} className="flex items-center gap-1.5">
