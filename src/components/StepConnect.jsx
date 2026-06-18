@@ -1,0 +1,90 @@
+import { useState } from 'react'
+import { fetchTableFields, fetchTableInfo } from '../lib/baserow'
+
+export default function StepConnect({ token, tableId, onChange, onConnected }) {
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [fields, setFields] = useState(null)
+  const [tableName, setTableName] = useState('')
+
+  const handleConnect = async () => {
+    setError('')
+    setFields(null)
+    setTableName('')
+    if (!token || !tableId) {
+      setError('Both an API token and a table ID are required.')
+      return
+    }
+    setLoading(true)
+    try {
+      const [tableInfo, fieldList] = await Promise.all([
+        fetchTableInfo(token, tableId),
+        fetchTableFields(token, tableId),
+      ])
+      setFields(fieldList)
+      setTableName(tableInfo.name)
+      onConnected({ table: tableInfo, fields: fieldList })
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">
+          Baserow API Token
+        </label>
+        <input
+          type="password"
+          value={token}
+          onChange={(e) => onChange({ token: e.target.value })}
+          placeholder="Paste your Baserow database token"
+          className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
+      </div>
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">Table ID</label>
+        <input
+          type="text"
+          value={tableId}
+          onChange={(e) => onChange({ tableId: e.target.value })}
+          placeholder="e.g. 1234"
+          className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
+      </div>
+
+      <button
+        onClick={handleConnect}
+        disabled={loading}
+        className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+      >
+        {loading ? 'Connecting…' : 'Connect'}
+      </button>
+
+      {error && (
+        <div className="rounded-md bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+          {error}
+        </div>
+      )}
+
+      {fields && (
+        <div className="rounded-md bg-emerald-50 border border-emerald-200 px-4 py-3">
+          <p className="text-sm font-medium text-emerald-800 mb-2">
+            Connected to <span className="font-semibold">{tableName}</span> — {fields.length} field
+            {fields.length === 1 ? '' : 's'} found
+          </p>
+          <ul className="text-sm text-emerald-700 space-y-0.5">
+            {fields.map((field) => (
+              <li key={field.id}>
+                {field.name} <span className="text-emerald-500">({field.type})</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  )
+}

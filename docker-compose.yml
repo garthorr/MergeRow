@@ -1,0 +1,17 @@
+services:
+  mergerow:
+    build: .
+    container_name: mergerow
+    restart: unless-stopped
+    networks:
+      - homelab
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.mergerow.rule=Host(`mergerow.home.tastymath.com`)
+      - traefik.http.routers.mergerow.entrypoints=websecure
+      - traefik.http.routers.mergerow.tls.certresolver=le
+      - traefik.http.services.mergerow.loadbalancer.server.port=80
+
+networks:
+  homelab:
+    external: true
