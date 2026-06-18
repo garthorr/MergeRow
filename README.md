@@ -47,19 +47,19 @@ Nginx to serve the static output + proxy `/api/` to `https://api.baserow.io`)
 and starts it as the `mergerow` service.
 
 By default the compose file expects an external Docker network called
-`homelab` and routes traffic through [Traefik](https://traefik.io) using
+`traefik` and routes traffic through [Traefik](https://traefik.io) using
 labels — there's no `ports:` mapping because Traefik is the ingress:
 
 ```yaml
 networks:
-  homelab:
+  traefik:
     external: true
 ```
 
 Create the network once if it doesn't already exist:
 
 ```bash
-docker network create homelab
+docker network create traefik
 ```
 
 Traefik is configured (via labels in `docker-compose.yml`) to route
