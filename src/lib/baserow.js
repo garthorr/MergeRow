@@ -64,6 +64,20 @@ export async function fetchTableFields(token, tableId) {
   return response.json()
 }
 
+// Lists every table the token has access to, across all databases. Unlike
+// the single-table metadata endpoint, this one is explicitly documented as
+// token-compatible — it's how a link_row field's `link_row_table_id` gets
+// turned into a human-readable table name.
+export async function fetchAllTables(token) {
+  const response = await fetch('/api/database/tables/all-tables/', {
+    headers: authHeaders(token),
+  })
+  if (!response.ok) {
+    throw new Error(`Failed to fetch tables: ${await parseErrorMessage(response)}`)
+  }
+  return response.json()
+}
+
 export async function fetchAllRows(token, tableId, { pageSize = 100 } = {}) {
   const rows = []
   let page = 1

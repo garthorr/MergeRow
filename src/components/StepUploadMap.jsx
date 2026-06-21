@@ -11,7 +11,21 @@ function autoMatch(headers, fields) {
   return mapping
 }
 
-export default function StepUploadMap({ fields, csvHeaders, csvRows, mapping, matchKeyFieldId, onChange }) {
+function linkFieldLabel(field, linkedTableInfo) {
+  const info = linkedTableInfo[field.link_row_table_id]
+  if (!info) return `${field.name} (link to table)`
+  return `${field.name} (link to ${info.name} — matches ${info.primaryFieldName})`
+}
+
+export default function StepUploadMap({
+  fields,
+  linkedTableInfo = {},
+  csvHeaders,
+  csvRows,
+  mapping,
+  matchKeyFieldId,
+  onChange,
+}) {
   const [error, setError] = useState('')
   const [fileName, setFileName] = useState('')
 
@@ -86,10 +100,11 @@ export default function StepUploadMap({ fields, csvHeaders, csvRows, mapping, ma
             </p>
           )}
           <p className="text-xs text-gray-500">
-            Fields marked <span className="font-medium">(link to table)</span> are relationships —
-            map a column to one to set links by name (comma-separate multiple names). A name that
-            doesn't match an existing row in the linked table will fail at commit time rather than
-            create a new row. Leave a link field unmapped to keep its existing links untouched.
+            Fields labeled <span className="font-medium">(link to …)</span> are relationships to
+            another table — map a column to one to set links by name (comma-separate multiple
+            names). The label shows which table and which field of that table the name has to
+            match. A name with no match fails at commit time rather than creating a new row.
+            Leave a link field unmapped to keep its existing links untouched.
           </p>
           <div className="overflow-hidden rounded-md border border-gray-200">
             <table className="w-full text-sm">
@@ -112,8 +127,7 @@ export default function StepUploadMap({ fields, csvHeaders, csvRows, mapping, ma
                         <option value="">— Do not map —</option>
                         {mappableFields.map((field) => (
                           <option key={field.id} value={field.id}>
-                            {field.name}
-                            {isLinkRowField(field) ? ' (link to table)' : ''}
+                            {isLinkRowField(field) ? linkFieldLabel(field, linkedTableInfo) : field.name}
                           </option>
                         ))}
                       </select>

@@ -12,6 +12,7 @@ export default function App() {
   const [token, setToken] = useState('')
   const [tableId, setTableId] = useState('')
   const [fields, setFields] = useState([])
+  const [linkedTableInfo, setLinkedTableInfo] = useState({})
 
   // Step 2
   const [csvHeaders, setCsvHeaders] = useState([])
@@ -49,13 +50,17 @@ export default function App() {
                 if ('token' in changes) setToken(changes.token)
                 if ('tableId' in changes) setTableId(changes.tableId)
               }}
-              onConnected={({ fields: fieldList }) => setFields(fieldList)}
+              onConnected={({ fields: fieldList, linkedTableInfo: info }) => {
+                setFields(fieldList)
+                setLinkedTableInfo(info || {})
+              }}
             />
           )}
 
           {step === 2 && (
             <StepUploadMap
               fields={fields}
+              linkedTableInfo={linkedTableInfo}
               csvHeaders={csvHeaders}
               csvRows={csvRows}
               mapping={mapping}

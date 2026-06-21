@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { fetchTableFields } from '../lib/baserow'
+import { fetchTableFields, fetchAllTables, isLinkRowField } from '../lib/baserow'
 
 export default function StepConnect({ token, tableId, onChange, onConnected }) {
   const [loading, setLoading] = useState(false)
@@ -16,11 +16,30 @@ export default function StepConnect({ token, tableId, onChange, onConnected }) {
     setLoading(true)
     try {
       // Database tokens are scoped to row/field data only — table metadata
-      // endpoints (like the table's display name) require JWT/session auth,
-      // so there's no token-compatible way to fetch the name here.
+      // endpoints (like this table's own display name) require JWT/session
+      // auth. `all-tables/` is explicitly token-compatible though, so it can
+      // resolve the *other* tables that link_row fields point to.
       const fieldList = await fetchTableFields(token, tableId)
+      const tables = await fetchAllTables(token)
+      const tableNameById = new Map(tables.map((t) => [t.id, t.name]))
+
+      const linkedTableIds = [
+        ...new Set(fieldList.filter(isLinkRowField).map((f) => f.link_row_table_id)),
+      ]
+      const linkedFieldLists = await Promise.all(
+        linkedTableIds.map((id) => fetchTableFields(token, id)),
+      )
+      const linkedTableInfo = {}
+      linkedTableIds.forEach((id, i) => {
+        const primaryField = linkedFieldLists[i].find((f) => f.primary)
+        linkedTableInfo[id] = {
+          name: tableNameById.get(id) || `Table ${id}`,
+          primaryFieldName: primaryField ? primaryField.name : 'primary field',
+        }
+      })
+
       setFields(fieldList)
-      onConnected({ fields: fieldList })
+      onConnected({ fields: fieldList, linkedTableInfo })
     } catch (err) {
       setError(err.message)
     } finally {
@@ -79,6 +98,9 @@ export default function StepConnect({ token, tableId, onChange, onConnected }) {
               </li>
             ))}
           </ul>
+          <p className="mt-2 text-xs text-emerald-600">
+            Link-to-table fields will show which table and field they match against in Step 2.
+          </p>
         </div>
       )}
     </div>

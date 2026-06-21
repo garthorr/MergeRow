@@ -119,9 +119,11 @@ lookup, count, rollup, created/last-modified) — you can never map a CSV
 column onto one. `link_row` (relationship) fields, however, *can* be
 mapped: a column whose text matches the linked table's primary field (e.g.
 a Unit or Position name) can be used to set that relationship directly from
-the import. Fields offering this are labeled **(link to table)** in the
-dropdown. Comma-separate multiple values in one cell to link a row to
-several rows in the other table.
+the import. Step 1 resolves which table and field each link points to (via
+Baserow's `link_row_table_id` and that table's primary field), so Step 2's
+dropdown labels these as e.g. **"Position (link to Positions — matches
+Name)"** rather than a bare field name. Comma-separate multiple values in
+one cell to link a row to several rows in the other table.
 
 A few things to know about mapping a link field:
 
