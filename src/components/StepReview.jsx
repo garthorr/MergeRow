@@ -139,6 +139,40 @@ export default function StepReview({ token, plan, csvRows, roleByHeader, diffs, 
     return { unit: lv(s.unit) || '(district)', position: lv(s.position) }
   }
 
+  // A role change is a delete (old position) + create (new position) within the
+  // same unit. Pair those up per unit so it reads as one story —
+  // "Scoutmaster → Committee Chair" — while keeping the two underlying toggles.
+  const buildAssignmentView = (assignments) => {
+    const byUnit = new Map()
+    for (const entry of assignments) {
+      const uk = entry.row.key.split('|')[1]
+      if (!byUnit.has(uk)) byUnit.set(uk, [])
+      byUnit.get(uk).push(entry)
+    }
+    const out = []
+    const byPos = (a, b) => assignmentDisplay(a.row).position.localeCompare(assignmentDisplay(b.row).position)
+    for (const entries of byUnit.values()) {
+      const news = entries.filter((e) => e.row.category === 'new').sort(byPos)
+      const missings = entries.filter((e) => e.row.category === 'missing').sort(byPos)
+      const others = entries.filter((e) => e.row.category === 'changed' || e.row.category === 'unchanged')
+      const paired = Math.min(news.length, missings.length)
+      for (let i = 0; i < paired; i += 1) {
+        out.push({
+          kind: 'pair',
+          oldEntry: missings[i],
+          newEntry: news[i],
+          oldPos: assignmentDisplay(missings[i].row).position,
+          newPos: assignmentDisplay(news[i].row).position,
+          unit: assignmentDisplay(news[i].row).unit,
+        })
+      }
+      for (let i = paired; i < news.length; i += 1) out.push({ kind: 'single', entry: news[i] })
+      for (let i = paired; i < missings.length; i += 1) out.push({ kind: 'single', entry: missings[i] })
+      for (const entry of others) out.push({ kind: 'single', entry })
+    }
+    return out
+  }
+
   const conflictEmails = new Set(
     entities.warnings.filter((w) => w.type === 'email-name-conflict').map((w) => w.email.toLowerCase()),
   )
@@ -303,17 +337,54 @@ export default function StepReview({ token, plan, csvRows, roleByHeader, diffs, 
                   </div>
                 )}
 
-                {/* Assignment-level */}
+                {/* Assignment-level — role changes paired as old → new */}
                 {p.assignments.length > 0 && (
                   <ul className="mt-1 space-y-0.5">
-                    {p.assignments.map(({ row, index }) => {
+                    {buildAssignmentView(p.assignments).map((view, i) => {
+                      if (view.kind === 'pair') {
+                        return (
+                          <li key={i} className="flex items-start justify-between gap-3 text-sm">
+                            <div className="flex items-start gap-2">
+                              <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[11px] font-semibold text-blue-700">
+                                Role change
+                              </span>
+                              <span className="text-gray-700">
+                                <span className="text-red-600 line-through">{view.oldPos}</span>{' '}
+                                <span className="text-gray-400">→</span>{' '}
+                                <span className="font-medium text-emerald-700">{view.newPos}</span>
+                                <span className="text-gray-400"> · {view.unit}</span>
+                              </span>
+                            </div>
+                            <div className="flex shrink-0 items-center gap-3 text-xs">
+                              <label className="flex items-center gap-1 text-emerald-700">
+                                <input
+                                  type="checkbox"
+                                  checked={view.newEntry.row.include}
+                                  onChange={() => toggleInclude('assignments', view.newEntry.index)}
+                                />
+                                create new
+                              </label>
+                              <label className="flex items-center gap-1 text-red-700">
+                                <input
+                                  type="checkbox"
+                                  checked={view.oldEntry.row.markDelete}
+                                  onChange={() => toggleDelete('assignments', view.oldEntry.index)}
+                                />
+                                remove old
+                              </label>
+                            </div>
+                          </li>
+                        )
+                      }
+                      const { row, index } = view.entry
                       const d = assignmentDisplay(row)
                       return (
-                        <li key={index} className="flex items-start justify-between gap-3 text-sm">
+                        <li key={i} className="flex items-start justify-between gap-3 text-sm">
                           <div className="flex items-start gap-2">
                             <Badge category={row.category} />
                             <span className={row.category === 'unchanged' ? 'text-gray-400' : 'text-gray-700'}>
                               {d.position} <span className="text-gray-400">·</span> {d.unit}
+                              {row.category === 'changed' && <ChangeList table={assignTable} changes={row.changes} />}
                             </span>
                           </div>
                           {row.category === 'missing' ? (
@@ -327,14 +398,6 @@ export default function StepReview({ token, plan, csvRows, roleByHeader, diffs, 
                         </li>
                       )
                     })}
-                    {p.assignments.some((e) => e.row.category === 'changed') &&
-                      p.assignments
-                        .filter((e) => e.row.category === 'changed')
-                        .map(({ row, index }) => (
-                          <li key={`c-${index}`} className="pl-7">
-                            <ChangeList table={assignTable} changes={row.changes} />
-                          </li>
-                        ))}
                   </ul>
                 )}
               </div>
