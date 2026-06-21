@@ -39,6 +39,7 @@ run the app through Docker (below) to exercise the Nginx proxy.
 ## Running with Docker
 
 ```bash
+cp .env.example .env   # then edit .env with your real Baserow URL
 docker compose up --build
 ```
 
@@ -46,11 +47,13 @@ This builds the app with a multi-stage Dockerfile (Node for the Vite build,
 Nginx to serve the static output + proxy `/api/` to your Baserow instance)
 and starts it as the `mergerow` service.
 
-The Baserow instance is set via the `BASEROW_URL` environment variable in
-`docker-compose.yml` (defaults to `https://baserow.home.tastymath.com`).
+The Baserow instance is set via the `BASEROW_URL` environment variable,
+read from a local `.env` file (`.env` is git-ignored, so your real URL never
+ends up in version control — only the placeholder in `.env.example` is
+tracked). Compose fails fast with a clear error if `BASEROW_URL` isn't set.
 Nginx substitutes it into the proxy config at container start, so switching
-instances is a one-line edit — no rebuild needed, just `docker compose up -d`
-to recreate the container. Point it at Baserow Cloud
+instances later is a one-line edit to `.env` — no rebuild needed, just
+`docker compose up -d` to recreate the container. Point it at Baserow Cloud
 (`https://api.baserow.io`), a self-hosted instance's public hostname, or —
 if Baserow runs as another container on the same `traefik` network — an
 internal service name/port (e.g. `http://baserow:80`), which also sidesteps
@@ -88,8 +91,12 @@ then open http://localhost:8080.
 
 ## Getting a Baserow API token and table ID
 
-- Generate a database token from your Baserow account settings
-  (**Settings → API tokens**).
+- Generate a **database token** from your Baserow account settings
+  (**Settings → API tokens**). Database tokens only grant access to row and
+  field *data* — they can't read or change table/database *structure*
+  (renaming a table, etc.), which requires logging in with JWT/session auth
+  instead. That's fine here: MergeRow only ever calls the data endpoints
+  (list fields, list/create/update/delete rows).
 - The table ID is the numeric ID visible in the table's URL, e.g.
   `https://baserow.io/database/123/table/456` → table ID `456`.
 

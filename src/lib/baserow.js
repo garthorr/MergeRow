@@ -53,16 +53,6 @@ async function parseErrorMessage(response) {
   }
 }
 
-export async function fetchTableInfo(token, tableId) {
-  const response = await fetch(`/api/database/tables/${tableId}/`, {
-    headers: authHeaders(token),
-  })
-  if (!response.ok) {
-    throw new Error(`Failed to fetch table: ${await parseErrorMessage(response)}`)
-  }
-  return response.json()
-}
-
 export async function fetchTableFields(token, tableId) {
   const response = await fetch(`/api/database/fields/table/${tableId}/`, {
     headers: authHeaders(token),
