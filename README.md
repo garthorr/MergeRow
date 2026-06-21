@@ -1,54 +1,69 @@
 # MergeRow
 
-MergeRow (a.k.a. BaserowSync) is a small, backend-free web app that syncs a
-CSV file into a [Baserow](https://baserow.io) table. Everything runs in the
-browser — Nginx just serves the static build and proxies API calls to
-Baserow so there are no CORS issues.
+MergeRow is a backend-free web app that takes **one** denormalized roster CSV
+(each row is a single position-assignment, with the same person/unit/position
+repeated across many rows) and reconciles it into a related set of
+[Baserow](https://baserow.io) tables in a single pass. Everything runs in the
+browser — Nginx just serves the static build and proxies API calls to Baserow
+so there are no CORS issues.
+
+It's a full-export sync: every entity is categorized as **New / Changed /
+Unchanged / Missing**, and you commit creates, updates and deletes from one
+review screen.
+
+## The data model
+
+The single CSV is normalized (fanned out) into up to four target tables, and
+you choose which of them to sync on any given run:
+
+- **Contacts** — one row per person. Key: **Email**.
+- **Units** — one row per unit (e.g. `Pack 0070`). Key: **Unit name**.
+- **Positions** — catalog of role types. Key: **Position name**.
+- **Contact Assignments** — the join: one row per roster line, with single-value
+  links to Contact / Unit / Position plus Program, Direct Contact Leader and
+  Registration Expiration Date. It has no natural ID, so identity is the
+  synthesized composite key **`Email | Unit | Position`** — changing someone's
+  role is therefore a delete + create at the assignment level, not an in-place
+  edit.
 
 ## How it works
 
 A 4-step wizard:
 
-1. **Connect** — enter a Baserow API token and table ID, fetch the table's
-   field schema.
-2. **Upload & Map** — upload a CSV (parsed client-side with PapaParse), map
-   each CSV column to a Baserow field (auto-matched by name), and choose a
-   match key field that uniquely identifies a row.
-3. **Diff** — fetch every existing row from Baserow and compare it against
-   the CSV by match key. Rows are categorized as **New**, **Changed**,
-   **Unchanged**, or **Missing** (present in Baserow but absent from the
-   CSV). Each row can be included/excluded from the commit; missing rows
-   require an explicit checkbox before they're queued for deletion (or use
-   "Select all for deletion" / "Clear all" to do that in bulk).
-4. **Commit** — review a summary of pending creates/updates/deletes, confirm,
-   and watch per-row progress as MergeRow calls the Baserow API. Any mapped
-   link-to-table column is resolved client-side first: a name is matched
-   case/whitespace-insensitively against the linked table's existing rows,
-   and if nothing matches, a new row is created there before the link is
-   written — this is different from Baserow's own API, which errors out
-   instead of creating the missing row.
+1. **Connect** — enter a Baserow API token and the Table ID for each table you
+   want to sync (uncheck any to skip). MergeRow fetches each table's field
+   schema and detects its primary field (the Contact link resolves against
+   Contacts' primary field — ideally Email).
+2. **Map** — upload the roster CSV (parsed client-side with PapaParse). Its
+   columns are auto-assigned to roles (Email, Unit, Position, …), and each
+   table's fields are auto-mapped from those roles. Per-link **"Auto-create
+   missing rows"** toggles default on for Units/Positions (catalogs grow) and
+   off for the Contact link (an unmatched contact is a typo, not a new person).
+3. **Review** — every enabled table is diffed independently against Baserow by
+   its own key, and the results are shown **contact-centrically**: per person,
+   their contact-level change and their assignment/role changes side by side,
+   so "moved from Den Leader to Cubmaster" reads as one story even though it's a
+   delete + create underneath. Data-quality issues are surfaced as warnings
+   (e.g. the same email on two different names) without breaking the run.
+   Missing rows need an explicit per-row delete check, with bulk select/clear.
+4. **Commit** — one action, ordered by the tool: Contacts, Units and Positions
+   first, then Contact Assignments, whose Contact/Unit/Position links are
+   resolved (case/whitespace-insensitively) against the rows that were just
+   written. Watch per-action progress as MergeRow calls the Baserow API.
 
 The API token is kept in React component state only — it is never written
 to `localStorage`, cookies, or any backend.
 
-## Syncing related tables (e.g. a Contacts ↔ Assignments join table)
+## Code layout
 
-If your CSV export is itself a join table — each row links one record from
-table A to one from table B (for example a `Contact Assignments` export
-where each row references a `Contact` by email and a `Unit`/`Position` by
-name) — run the wizard once per CSV/table pair rather than trying to do it
-in one pass:
-
-1. Sync the "leaf" table(s) first (e.g. `Contacts.csv` → the Contacts
-   table), matched by a stable key like email. Leave any column that's
-   really just a reverse lookup of the join table unmapped — Baserow
-   derives it automatically once the join rows point at it.
-2. Sync the join-table CSV itself (e.g. `Contact_Assignments.csv` → the
-   Contact Assignments table) matched by its own stable key (e.g. an
-   `Assignment ID` column), mapping each relationship column to its
-   `link_row` field. New/changed/removed assignments fall out of the normal
-   diff categorization, and any Unit/Position name not yet in Baserow gets
-   created automatically as described above.
+- `src/lib/normalize.js` — the fan-out: dedupes the flat sheet into Contacts /
+  Units / Positions / Assignments and collects data-quality warnings.
+- `src/lib/diff.js` — the generic, per-table New/Changed/Unchanged/Missing
+  engine plus value coercion (booleans, `M/D/YYYY` → ISO dates).
+- `src/lib/sync.js` — slot↔field mapping, multi-table diffing, and the
+  dependency-ordered commit.
+- `src/lib/baserow.js` / `src/lib/linkResolve.js` — the Baserow REST wrapper
+  (field-key/CRUD/paging) and the client-side link resolver.
 
 ## Local development
 

@@ -1,0 +1,271 @@
+// Plan/diff/commit glue between the normalized roster entities and the 1–4
+// Baserow tables. Knows each table's slot schema, auto-maps slots to fields,
+// builds the per-table diffs, and runs the commit in dependency order:
+// Contacts / Units / Positions first, then Contact Assignments (whose links
+// resolve against the rows just written).
+
+import {
+  fieldKey,
+  isLinkRowField,
+  isMappableField,
+  createRow,
+  updateRow,
+  deleteRow,
+} from './baserow'
+import { buildTableDiff, coerceForWrite, norm } from './diff'
+import { resolveLinkRowValues } from './linkResolve'
+
+export const TABLE_ORDER = ['contacts', 'units', 'positions', 'assignments']
+
+export const TABLE_LABELS = {
+  contacts: 'Contacts',
+  units: 'Units',
+  positions: 'Positions',
+  assignments: 'Contact Assignments',
+}
+
+// Each table's logical slots. `isKey` slots drive identity (and are excluded
+// from Changed detection — a differing key is a different row). `link` slots
+// are single-value relationships resolved by name at commit time.
+export const TABLE_SLOTS = {
+  contacts: [
+    { key: 'email', label: 'Email (key)', isKey: true, synonyms: ['email', 'e-mail'] },
+    { key: 'firstName', label: 'First Name', synonyms: ['first name', 'first'] },
+    { key: 'lastName', label: 'Last Name', synonyms: ['last name', 'last'] },
+    { key: 'middleName', label: 'Middle Name', optional: true, synonyms: ['middle name', 'middle'] },
+    { key: 'fullName', label: 'Full / display Name', optional: true, synonyms: ['full name', 'name'] },
+  ],
+  units: [
+    { key: 'name', label: 'Unit Name (key)', isKey: true, synonyms: ['name', 'unit'] },
+    { key: 'charteredOrg', label: 'Chartered Org', synonyms: ['chartered org', 'chartered organization', 'chartered org name'] },
+    { key: 'district', label: 'District', synonyms: ['district'] },
+  ],
+  positions: [{ key: 'name', label: 'Position Name (key)', isKey: true, synonyms: ['name', 'position'] }],
+  assignments: [
+    { key: 'contact', label: 'Contact (link)', link: true, isKey: true, synonyms: ['contact', 'contacts'] },
+    { key: 'unit', label: 'Unit (link)', link: true, isKey: true, synonyms: ['unit', 'units'] },
+    { key: 'position', label: 'Position (link)', link: true, isKey: true, synonyms: ['position', 'positions'] },
+    { key: 'program', label: 'Program', synonyms: ['program'] },
+    { key: 'dcl', label: 'Direct Contact Leader', synonyms: ['direct contact leader', 'direct contact'] },
+    {
+      key: 'regExpDate',
+      label: 'Registration Expiration Date',
+      synonyms: ['registration expiration date', 'registration expiration', 'expiration'],
+    },
+  ],
+}
+
+// Best-effort slot -> field mapping by name; key slots fall back to the
+// table's primary field, link slots only ever bind to link_row fields.
+export function autoMapSlots(tableKey, fields) {
+  const slots = TABLE_SLOTS[tableKey]
+  const primary = fields.find((f) => f.primary)
+  const used = new Set()
+  const map = {}
+  for (const slot of slots) {
+    let field = null
+    if (slot.link) {
+      const links = fields.filter((f) => isLinkRowField(f) && !used.has(f.id))
+      field = links.find((f) => slot.synonyms.includes(norm(f.name))) || null
+    } else {
+      const cands = fields.filter(
+        (f) => !used.has(f.id) && isMappableField(f) && !isLinkRowField(f),
+      )
+      field = cands.find((f) => slot.synonyms.includes(norm(f.name))) || null
+      if (!field && slot.isKey && primary && !used.has(primary.id)) field = primary
+    }
+    if (field) {
+      map[slot.key] = String(field.id)
+      used.add(field.id)
+    }
+  }
+  return map
+}
+
+function slotValueForEntity(tableKey, slotKey, entity) {
+  if (tableKey === 'contacts') {
+    return {
+      email: entity.email,
+      firstName: entity.firstName,
+      lastName: entity.lastName,
+      middleName: entity.middleName,
+      fullName: entity.fullName,
+    }[slotKey]
+  }
+  if (tableKey === 'units') {
+    return { name: entity.name, charteredOrg: entity.charteredOrg, district: entity.district }[slotKey]
+  }
+  if (tableKey === 'positions') {
+    return { name: entity.name }[slotKey]
+  }
+  // assignments
+  return {
+    contact: entity.email,
+    unit: entity.unitName,
+    position: entity.positionName,
+    program: entity.program,
+    dcl: entity.directContactLeader,
+    regExpDate: entity.regExpDate,
+  }[slotKey]
+}
+
+function itemLabel(tableKey, entity) {
+  if (tableKey === 'contacts') return entity.fullName || entity.email
+  if (tableKey === 'units') return entity.name
+  if (tableKey === 'positions') return entity.name
+  return `${entity.unitName || '(district)'} · ${entity.positionName}`
+}
+
+// Projects entities into diff "items": `values` keyed by Baserow field ID,
+// with link slots carrying a single-element name array ([] when blank, e.g. a
+// district-level assignment with no Unit).
+export function buildItems(tableKey, entities, slotMap) {
+  const slots = TABLE_SLOTS[tableKey]
+  return entities.map((entity) => {
+    const values = {}
+    for (const slot of slots) {
+      const fid = slotMap[slot.key]
+      if (!fid) continue
+      const raw = slotValueForEntity(tableKey, slot.key, entity)
+      if (slot.link) {
+        const name = String(raw || '').trim()
+        values[fid] = name ? [name] : []
+      } else {
+        values[fid] = raw
+      }
+    }
+    return { key: entity.key, label: itemLabel(tableKey, entity), values, entity }
+  })
+}
+
+export function compareFieldIds(tableKey, slotMap) {
+  return TABLE_SLOTS[tableKey].filter((s) => !s.isKey).map((s) => slotMap[s.key]).filter(Boolean)
+}
+
+function linkValue(row, fid) {
+  if (!fid) return ''
+  const arr = row[fieldKey(fid)]
+  if (Array.isArray(arr) && arr.length) {
+    const v = arr[0]
+    return norm(v && typeof v === 'object' ? v.value : v)
+  }
+  return ''
+}
+
+// Derives the same key the entity uses, from a Baserow row. For assignments
+// this reads the three link fields' primary-field text (Contact link's text is
+// the contact's Email — its Baserow primary field), matching the synthesized
+// `email | unit | position` triple.
+export function makeBaserowKeyOf(tableKey, slotMap) {
+  if (tableKey === 'assignments') {
+    const { contact, unit, position } = slotMap
+    return (row) =>
+      `${linkValue(row, contact)}|${linkValue(row, unit)}|${linkValue(row, position)}`
+  }
+  const keySlot = TABLE_SLOTS[tableKey].find((s) => s.isKey)
+  const fid = slotMap[keySlot.key]
+  return (row) => norm(fid ? row[fieldKey(fid)] : '')
+}
+
+function enabledTableKeys(plan) {
+  return TABLE_ORDER.filter((k) => {
+    const t = plan.tables[k]
+    return t && t.enabled && t.tableId
+  })
+}
+
+export function buildAllDiffs({ entities, plan, baserowRowsByTable }) {
+  const diffs = {}
+  for (const tableKey of enabledTableKeys(plan)) {
+    const t = plan.tables[tableKey]
+    const items = buildItems(tableKey, entities[tableKey] || [], t.slots)
+    diffs[tableKey] = buildTableDiff({
+      items,
+      baserowRows: baserowRowsByTable[tableKey] || [],
+      baserowKeyOf: makeBaserowKeyOf(tableKey, t.slots),
+      compareFieldIds: compareFieldIds(tableKey, t.slots),
+      fields: t.fields,
+    })
+  }
+  return diffs
+}
+
+function buildWritePayload(item, fields) {
+  const fieldsById = new Map(fields.map((f) => [String(f.id), f]))
+  const payload = {}
+  for (const [fid, val] of Object.entries(item.values)) {
+    const field = fieldsById.get(String(fid))
+    if (!field) continue
+    payload[fid] = isLinkRowField(field) ? val : coerceForWrite(field, val)
+  }
+  return payload
+}
+
+// Flattens the selected diff rows into an ordered action list (creates/updates
+// for new/changed rows the user kept, deletes for missing rows checked for
+// deletion). Order follows TABLE_ORDER so dependencies are satisfied.
+export function collectActions(plan, diffs) {
+  const actions = []
+  for (const tableKey of enabledTableKeys(plan)) {
+    const t = plan.tables[tableKey]
+    for (const row of diffs[tableKey] || []) {
+      const base = { tableKey, tableId: t.tableId, fields: t.fields, row }
+      if (row.category === 'new' && row.include) {
+        actions.push({ ...base, type: 'create', payload: buildWritePayload(row.item, t.fields), label: `${TABLE_LABELS[tableKey]}: create ${row.item.label}` })
+      } else if (row.category === 'changed' && row.include) {
+        actions.push({ ...base, type: 'update', payload: buildWritePayload(row.item, t.fields), label: `${TABLE_LABELS[tableKey]}: update ${row.item.label}` })
+      } else if (row.category === 'missing' && row.markDelete) {
+        actions.push({ ...base, type: 'delete', payload: null, label: `${TABLE_LABELS[tableKey]}: delete ${row.key}` })
+      }
+    }
+  }
+  return actions
+}
+
+// Executes the actions in order. Assignment link names are resolved to row IDs
+// just before that table's writes — after Contacts/Units/Positions have been
+// committed — so links can bind to freshly created rows. The Contact link does
+// not auto-create (an unmatched contact is a typo): only that row fails.
+export async function commitAll(token, plan, diffs, onProgress) {
+  const actions = collectActions(plan, diffs)
+  let i = 0
+  while (i < actions.length) {
+    const tableKey = actions[i].tableKey
+    let j = i
+    while (j < actions.length && actions[j].tableKey === tableKey) j += 1
+    const slice = actions.slice(i, j)
+
+    if (tableKey === 'assignments') {
+      const t = plan.tables.assignments
+      const ac = {}
+      if (t.slots.unit) ac[t.slots.unit] = t.autoCreate?.unit !== false
+      if (t.slots.position) ac[t.slots.position] = t.autoCreate?.position !== false
+      if (t.slots.contact) ac[t.slots.contact] = t.autoCreate?.contact === true
+      const shaped = slice.map((a) => ({
+        ...a,
+        row: { fieldValues: a.payload ? { ...a.payload } : {}, key: a.row.key, baserowRow: a.row.baserowRow },
+      }))
+      const resolved = await resolveLinkRowValues(token, t.fields, shaped, ac)
+      resolved.forEach((r, k) => {
+        slice[k].payload = r.row.fieldValues
+        slice[k].resolveError = r.resolveError
+      })
+    }
+
+    for (let k = 0; k < slice.length; k += 1) {
+      const action = slice[k]
+      const idx = i + k
+      if (onProgress) onProgress(idx, 'running')
+      try {
+        if (action.resolveError) throw new Error(action.resolveError)
+        if (action.type === 'create') await createRow(token, action.tableId, action.payload)
+        else if (action.type === 'update') await updateRow(token, action.tableId, action.row.baserowRow.id, action.payload)
+        else if (action.type === 'delete') await deleteRow(token, action.tableId, action.row.baserowRow.id)
+        if (onProgress) onProgress(idx, 'success')
+      } catch (err) {
+        if (onProgress) onProgress(idx, 'error', err.message)
+      }
+    }
+    i = j
+  }
+}

@@ -1,4 +1,4 @@
-const STEPS = ['Connect', 'Upload & Map', 'Diff', 'Commit']
+const STEPS = ['Connect', 'Map', 'Review', 'Commit']
 
 export default function Stepper({ currentStep }) {
   return (
@@ -21,17 +21,11 @@ export default function Stepper({ currentStep }) {
               >
                 {stepNumber}
               </span>
-              <span
-                className={`text-sm font-medium ${
-                  isActive ? 'text-gray-900' : 'text-gray-500'
-                }`}
-              >
+              <span className={`text-sm font-medium ${isActive ? 'text-gray-900' : 'text-gray-500'}`}>
                 {label}
               </span>
             </div>
-            {stepNumber !== STEPS.length && (
-              <div className="mx-3 h-px flex-1 bg-gray-200" />
-            )}
+            {stepNumber !== STEPS.length && <div className="mx-3 h-px flex-1 bg-gray-200" />}
           </li>
         )
       })}

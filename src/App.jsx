@@ -1,108 +1,119 @@
 import { useState } from 'react'
 import Stepper from './components/Stepper'
 import StepConnect from './components/StepConnect'
-import StepUploadMap from './components/StepUploadMap'
-import StepDiff from './components/StepDiff'
+import StepMap from './components/StepMap'
+import StepReview from './components/StepReview'
 import StepCommit from './components/StepCommit'
+import { TABLE_ORDER } from './lib/sync'
+
+function emptyTable(name) {
+  return {
+    name,
+    enabled: true,
+    tableId: '',
+    fields: [],
+    primaryFieldId: '',
+    linkedTableInfo: {},
+    slots: {},
+    autoCreate: { unit: true, position: true, contact: false },
+    connected: false,
+  }
+}
+
+function initialPlan() {
+  return {
+    tables: {
+      contacts: emptyTable('Contacts'),
+      units: emptyTable('Units'),
+      positions: emptyTable('Positions'),
+      assignments: emptyTable('Contact Assignments'),
+    },
+  }
+}
 
 export default function App() {
   const [step, setStep] = useState(1)
-
-  // Step 1
   const [token, setToken] = useState('')
-  const [tableId, setTableId] = useState('')
-  const [fields, setFields] = useState([])
-  const [linkedTableInfo, setLinkedTableInfo] = useState({})
+  const [plan, setPlan] = useState(initialPlan)
 
-  // Step 2
   const [csvHeaders, setCsvHeaders] = useState([])
   const [csvRows, setCsvRows] = useState([])
-  const [mapping, setMapping] = useState({})
-  const [matchKeyFieldId, setMatchKeyFieldId] = useState('')
-  const [linkAutoCreate, setLinkAutoCreate] = useState({})
+  const [roleByHeader, setRoleByHeader] = useState({})
 
-  // Step 3
-  const [diffRows, setDiffRows] = useState([])
+  const [diffs, setDiffs] = useState(null)
 
-  const canGoToStep2 = fields.length > 0
-  const canGoToStep3 = csvHeaders.length > 0 && Boolean(matchKeyFieldId)
-  const canGoToStep4 = diffRows.length > 0
+  const updateTable = (tableKey, changes) => {
+    setPlan((prev) => ({
+      ...prev,
+      tables: { ...prev.tables, [tableKey]: { ...prev.tables[tableKey], ...changes } },
+    }))
+  }
 
-  const goNext = () => setStep((s) => Math.min(4, s + 1))
-  const goBack = () => setStep((s) => Math.max(1, s - 1))
+  const activeTableKeys = TABLE_ORDER.filter((k) => plan.tables[k].enabled && plan.tables[k].tableId)
+  const connectedKeys = activeTableKeys.filter((k) => plan.tables[k].connected)
+
+  const canStep2 = connectedKeys.length > 0
+  const keySlotsReady = connectedKeys.every((k) => {
+    if (k === 'assignments') {
+      const s = plan.tables[k].slots
+      return s.contact && s.position
+    }
+    return Boolean(plan.tables[k].slots.name || plan.tables[k].slots.email)
+  })
+  const canStep3 = csvHeaders.length > 0 && keySlotsReady
+  const canStep4 = Boolean(diffs)
 
   const nextDisabled =
-    (step === 1 && !canGoToStep2) || (step === 2 && !canGoToStep3) || (step === 3 && !canGoToStep4)
+    (step === 1 && !canStep2) || (step === 2 && !canStep3) || (step === 3 && !canStep4)
 
   return (
     <div className="min-h-screen bg-gray-50 py-10 px-4">
-      <div className="mx-auto max-w-4xl">
+      <div className="mx-auto max-w-5xl">
         <h1 className="text-2xl font-bold text-gray-900 mb-1">MergeRow</h1>
-        <p className="text-sm text-gray-500 mb-6">Sync a CSV file into a Baserow table.</p>
+        <p className="text-sm text-gray-500 mb-6">
+          Reconcile one denormalized roster CSV into your Baserow Contacts, Units, Positions and
+          Assignments.
+        </p>
 
         <div className="rounded-lg bg-white shadow-sm border border-gray-200 p-6">
           <Stepper currentStep={step} />
 
           {step === 1 && (
-            <StepConnect
-              token={token}
-              tableId={tableId}
-              onChange={(changes) => {
-                if ('token' in changes) setToken(changes.token)
-                if ('tableId' in changes) setTableId(changes.tableId)
-              }}
-              onConnected={({ fields: fieldList, linkedTableInfo: info }) => {
-                setFields(fieldList)
-                setLinkedTableInfo(info || {})
-              }}
-            />
+            <StepConnect token={token} setToken={setToken} plan={plan} updateTable={updateTable} />
           )}
 
           {step === 2 && (
-            <StepUploadMap
-              fields={fields}
-              linkedTableInfo={linkedTableInfo}
+            <StepMap
+              plan={plan}
+              updateTable={updateTable}
               csvHeaders={csvHeaders}
               csvRows={csvRows}
-              mapping={mapping}
-              matchKeyFieldId={matchKeyFieldId}
-              linkAutoCreate={linkAutoCreate}
-              onChange={(changes) => {
-                if ('csvHeaders' in changes) setCsvHeaders(changes.csvHeaders)
-                if ('csvRows' in changes) setCsvRows(changes.csvRows)
-                if ('mapping' in changes) setMapping(changes.mapping)
-                if ('matchKeyFieldId' in changes) setMatchKeyFieldId(changes.matchKeyFieldId)
-                if ('linkAutoCreate' in changes) setLinkAutoCreate(changes.linkAutoCreate)
+              roleByHeader={roleByHeader}
+              onCsv={({ headers, rows, roles }) => {
+                setCsvHeaders(headers)
+                setCsvRows(rows)
+                setRoleByHeader(roles)
               }}
+              setRoleByHeader={setRoleByHeader}
             />
           )}
 
           {step === 3 && (
-            <StepDiff
+            <StepReview
               token={token}
-              tableId={tableId}
-              fields={fields}
-              mapping={mapping}
-              matchKeyFieldId={matchKeyFieldId}
+              plan={plan}
               csvRows={csvRows}
-              diffRows={diffRows}
-              setDiffRows={setDiffRows}
+              roleByHeader={roleByHeader}
+              diffs={diffs}
+              setDiffs={setDiffs}
             />
           )}
 
-          {step === 4 && (
-            <StepCommit
-              token={token}
-              tableId={tableId}
-              fields={fields}
-              diffRows={diffRows}
-              linkAutoCreate={linkAutoCreate}
-            />
-          )}
+          {step === 4 && <StepCommit token={token} plan={plan} diffs={diffs} />}
 
           <div className="mt-8 flex justify-between border-t border-gray-100 pt-4">
             <button
-              onClick={goBack}
+              onClick={() => setStep((s) => Math.max(1, s - 1))}
               disabled={step === 1}
               className="rounded-md px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 disabled:opacity-40"
             >
@@ -110,7 +121,7 @@ export default function App() {
             </button>
             {step < 4 && (
               <button
-                onClick={goNext}
+                onClick={() => setStep((s) => Math.min(4, s + 1))}
                 disabled={nextDisabled}
                 className="rounded-md bg-gray-900 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-800 disabled:opacity-40"
               >

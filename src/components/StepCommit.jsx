@@ -1,7 +1,5 @@
-import { useState } from 'react'
-import { createRow, updateRow, deleteRow } from '../lib/baserow'
-import { summarizeDiff } from '../lib/diff'
-import { resolveLinkRowValues } from '../lib/linkResolve'
+import { useMemo, useState } from 'react'
+import { collectActions, commitAll } from '../lib/sync'
 
 const STATUS_STYLES = {
   pending: 'text-gray-400',
@@ -10,103 +8,57 @@ const STATUS_STYLES = {
   error: 'text-red-600',
 }
 
-function buildActions(diffRows) {
-  const actions = []
-  diffRows.forEach((row, index) => {
-    if (row.category === 'new' && row.include) {
-      actions.push({ type: 'create', index, row, label: `Create ${row.key}` })
-    } else if (row.category === 'changed' && row.include) {
-      actions.push({ type: 'update', index, row, label: `Update ${row.key}` })
-    } else if (row.category === 'missing' && row.markDelete) {
-      actions.push({ type: 'delete', index, row, label: `Delete ${row.key}` })
-    }
-  })
-  return actions
-}
-
-export default function StepCommit({ token, tableId, fields, diffRows, linkAutoCreate = {} }) {
+export default function StepCommit({ token, plan, diffs }) {
   const [statuses, setStatuses] = useState({})
+  const [errors, setErrors] = useState({})
   const [running, setRunning] = useState(false)
   const [done, setDone] = useState(false)
-  const [resolving, setResolving] = useState(false)
-  const [error, setError] = useState('')
 
-  const summary = summarizeDiff(diffRows)
-  const actions = buildActions(diffRows)
+  const actions = useMemo(() => (diffs ? collectActions(plan, diffs) : []), [plan, diffs])
+
+  const counts = actions.reduce((acc, a) => {
+    acc[a.type] = (acc[a.type] || 0) + 1
+    return acc
+  }, {})
 
   const handleCommit = async () => {
     setRunning(true)
     setDone(false)
-    setError('')
-    const initial = {}
-    actions.forEach((_, i) => {
-      initial[i] = 'pending'
+    setStatuses({})
+    setErrors({})
+    await commitAll(token, plan, diffs, (idx, status, error) => {
+      setStatuses((prev) => ({ ...prev, [idx]: status }))
+      if (error) setErrors((prev) => ({ ...prev, [idx]: error }))
     })
-    setStatuses(initial)
-
-    let resolvedActions
-    try {
-      setResolving(true)
-      resolvedActions = await resolveLinkRowValues(token, fields, actions, linkAutoCreate)
-    } catch (err) {
-      setError(`Failed to resolve linked rows: ${err.message}`)
-      setResolving(false)
-      setRunning(false)
-      return
-    }
-    setResolving(false)
-
-    for (let i = 0; i < resolvedActions.length; i += 1) {
-      const action = resolvedActions[i]
-      setStatuses((prev) => ({ ...prev, [i]: 'running' }))
-      if (action.resolveError) {
-        setStatuses((prev) => ({ ...prev, [i]: 'error', [`${i}-error`]: action.resolveError }))
-        continue
-      }
-      try {
-        if (action.type === 'create') {
-          await createRow(token, tableId, action.row.fieldValues)
-        } else if (action.type === 'update') {
-          await updateRow(token, tableId, action.row.baserowRow.id, action.row.fieldValues)
-        } else if (action.type === 'delete') {
-          await deleteRow(token, tableId, action.row.baserowRow.id)
-        }
-        setStatuses((prev) => ({ ...prev, [i]: 'success' }))
-      } catch (err) {
-        setStatuses((prev) => ({ ...prev, [i]: 'error', [`${i}-error`]: err.message }))
-      }
-    }
-
     setRunning(false)
     setDone(true)
   }
 
-  const completedCount = Object.values(statuses).filter(
-    (s) => s === 'success' || s === 'error',
-  ).length
+  const completed = Object.values(statuses).filter((s) => s === 'success' || s === 'error').length
+  const failed = Object.values(statuses).filter((s) => s === 'error').length
 
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-3 gap-4 text-center">
         <div className="rounded-md bg-emerald-50 border border-emerald-200 px-4 py-3">
-          <p className="text-2xl font-semibold text-emerald-700">{summary.new}</p>
-          <p className="text-xs text-emerald-600">New rows</p>
+          <p className="text-2xl font-semibold text-emerald-700">{counts.create || 0}</p>
+          <p className="text-xs text-emerald-600">Creates</p>
         </div>
         <div className="rounded-md bg-amber-50 border border-amber-200 px-4 py-3">
-          <p className="text-2xl font-semibold text-amber-700">{summary.changed}</p>
+          <p className="text-2xl font-semibold text-amber-700">{counts.update || 0}</p>
           <p className="text-xs text-amber-600">Updates</p>
         </div>
         <div className="rounded-md bg-red-50 border border-red-200 px-4 py-3">
-          <p className="text-2xl font-semibold text-red-700">{summary.deletions}</p>
-          <p className="text-xs text-red-600">Deletions</p>
+          <p className="text-2xl font-semibold text-red-700">{counts.delete || 0}</p>
+          <p className="text-xs text-red-600">Deletes</p>
         </div>
       </div>
 
-      {error && (
-        <div className="rounded-md bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
-          {error}
-        </div>
-      )}
+      <p className="text-xs text-gray-500">
+        Committed in dependency order — Contacts, Units and Positions first, then Contact Assignments
+        (whose Contact / Unit / Position links resolve against the rows just written). One action;
+        the tool owns the ordering.
+      </p>
 
       {actions.length === 0 ? (
         <p className="text-sm text-gray-500">Nothing to commit — no rows are selected.</p>
@@ -116,11 +68,7 @@ export default function StepCommit({ token, tableId, fields, diffRows, linkAutoC
           disabled={running}
           className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
         >
-          {resolving
-            ? 'Resolving linked rows…'
-            : running
-              ? `Committing… (${completedCount}/${actions.length})`
-              : 'Confirm & Commit'}
+          {running ? `Committing… (${completed}/${actions.length})` : 'Confirm & Commit'}
         </button>
       )}
 
@@ -129,17 +77,15 @@ export default function StepCommit({ token, tableId, fields, diffRows, linkAutoC
           <div className="h-2 w-full overflow-hidden rounded-full bg-gray-200">
             <div
               className="h-2 rounded-full bg-blue-600 transition-all"
-              style={{ width: `${(completedCount / actions.length) * 100}%` }}
+              style={{ width: `${(completed / actions.length) * 100}%` }}
             />
           </div>
-          <ul className="divide-y divide-gray-100 rounded-md border border-gray-200 max-h-80 overflow-auto">
+          <ul className="divide-y divide-gray-100 rounded-md border border-gray-200 max-h-96 overflow-auto">
             {actions.map((action, i) => (
-              <li key={i} className="flex items-center justify-between px-3 py-2 text-sm">
-                <span>{action.label}</span>
-                <span className={`text-xs font-medium ${STATUS_STYLES[statuses[i] || 'pending']}`}>
-                  {statuses[i] === 'error'
-                    ? `Error: ${statuses[`${i}-error`] || 'failed'}`
-                    : statuses[i] || 'pending'}
+              <li key={i} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
+                <span className="truncate">{action.label}</span>
+                <span className={`shrink-0 text-xs font-medium ${STATUS_STYLES[statuses[i] || 'pending']}`}>
+                  {statuses[i] === 'error' ? `Error: ${errors[i] || 'failed'}` : statuses[i] || 'pending'}
                 </span>
               </li>
             ))}
@@ -148,8 +94,16 @@ export default function StepCommit({ token, tableId, fields, diffRows, linkAutoC
       )}
 
       {done && (
-        <div className="rounded-md bg-emerald-50 border border-emerald-200 px-4 py-3 text-sm text-emerald-700">
-          Sync complete.
+        <div
+          className={`rounded-md border px-4 py-3 text-sm ${
+            failed > 0
+              ? 'bg-amber-50 border-amber-200 text-amber-800'
+              : 'bg-emerald-50 border-emerald-200 text-emerald-700'
+          }`}
+        >
+          {failed > 0
+            ? `Sync complete with ${failed} failed action${failed === 1 ? '' : 's'} — see the list above.`
+            : 'Sync complete.'}
         </div>
       )}
     </div>
