@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import Papa from 'papaparse'
+import { isMappableField } from '../lib/baserow'
 
 function autoMatch(headers, fields) {
   const mapping = {}
@@ -13,6 +14,9 @@ function autoMatch(headers, fields) {
 export default function StepUploadMap({ fields, csvHeaders, csvRows, mapping, matchKeyFieldId, onChange }) {
   const [error, setError] = useState('')
   const [fileName, setFileName] = useState('')
+
+  const mappableFields = fields.filter(isMappableField)
+  const skippedFields = fields.filter((f) => !isMappableField(f))
 
   const handleFile = (e) => {
     const file = e.target.files?.[0]
@@ -29,7 +33,7 @@ export default function StepUploadMap({ fields, csvHeaders, csvRows, mapping, ma
           setError('No columns detected in this CSV.')
           return
         }
-        const newMapping = autoMatch(headers, fields)
+        const newMapping = autoMatch(headers, mappableFields)
         onChange({
           csvHeaders: headers,
           csvRows: results.data,
@@ -69,6 +73,13 @@ export default function StepUploadMap({ fields, csvHeaders, csvRows, mapping, ma
       {csvHeaders.length > 0 && (
         <div className="space-y-3">
           <p className="text-sm font-medium text-gray-700">Map CSV columns to Baserow fields</p>
+          {skippedFields.length > 0 && (
+            <p className="text-xs text-gray-500">
+              Not available for mapping: {skippedFields.map((f) => f.name).join(', ')}. Relationship
+              (link to table) and computed fields are never written to, so any existing links to
+              other tables are left intact.
+            </p>
+          )}
           <div className="overflow-hidden rounded-md border border-gray-200">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 text-left text-xs font-semibold text-gray-500 uppercase">
@@ -88,7 +99,7 @@ export default function StepUploadMap({ fields, csvHeaders, csvRows, mapping, ma
                         className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                       >
                         <option value="">— Do not map —</option>
-                        {fields.map((field) => (
+                        {mappableFields.map((field) => (
                           <option key={field.id} value={field.id}>
                             {field.name}
                           </option>

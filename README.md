@@ -43,8 +43,19 @@ docker compose up --build
 ```
 
 This builds the app with a multi-stage Dockerfile (Node for the Vite build,
-Nginx to serve the static output + proxy `/api/` to `https://api.baserow.io`)
+Nginx to serve the static output + proxy `/api/` to your Baserow instance)
 and starts it as the `mergerow` service.
+
+The Baserow instance is set via the `BASEROW_URL` environment variable in
+`docker-compose.yml` (defaults to `https://baserow.home.tastymath.com`).
+Nginx substitutes it into the proxy config at container start, so switching
+instances is a one-line edit — no rebuild needed, just `docker compose up -d`
+to recreate the container. Point it at Baserow Cloud
+(`https://api.baserow.io`), a self-hosted instance's public hostname, or —
+if Baserow runs as another container on the same `traefik` network — an
+internal service name/port (e.g. `http://baserow:80`), which also sidesteps
+any router NAT hairpin issues that can come up when a container calls back
+out to its own public hostname.
 
 By default the compose file expects an external Docker network called
 `traefik` and routes traffic through [Traefik](https://traefik.io) using
@@ -90,3 +101,19 @@ then open http://localhost:8080.
   set up in Step 2.
 - Fetching existing rows pages through `GET /api/database/rows/table/{id}/`
   (default page size 100) until there is no `next` page.
+- Updates are sent as `PATCH` requests that only include the fields you've
+  mapped — any field you don't map (and Baserow's own row metadata) is left
+  completely untouched.
+
+## Relationships (link-to-table fields) are preserved
+
+Step 2's field dropdown deliberately excludes `link_row` (relationship)
+fields, along with computed/read-only fields (formula, lookup, count,
+rollup, created/last-modified). You can never map a CSV column onto one.
+
+That matters because an `update` is a `PATCH` containing only the fields you
+mapped — Baserow leaves every other field on the row exactly as it was. So
+if, say, a Contact row is linked to a Position, and the new CSV shows that
+contact as otherwise unchanged, the contact↔position link is never part of
+the request and stays intact. The same is true for any field you simply
+choose not to map: it's just never sent.

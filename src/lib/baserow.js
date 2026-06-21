@@ -17,6 +17,26 @@ export function toApiFields(fieldValuesByFieldId) {
   return payload
 }
 
+// Field types that can't be safely written from a flat CSV string value.
+// `link_row` is excluded specifically so relationships to other tables (e.g.
+// a contact's linked position) are never overwritten by a sync — Baserow
+// expects an array of related row IDs for link fields, not raw text, and a
+// field that's never offered for mapping is a field that's never touched.
+// The rest are server-computed and rejected by the API if written to.
+export const UNMAPPABLE_FIELD_TYPES = new Set([
+  'link_row',
+  'formula',
+  'lookup',
+  'count',
+  'rollup',
+  'created_on',
+  'last_modified',
+])
+
+export function isMappableField(field) {
+  return !UNMAPPABLE_FIELD_TYPES.has(field.type)
+}
+
 function authHeaders(token) {
   return {
     Authorization: `Token ${token}`,

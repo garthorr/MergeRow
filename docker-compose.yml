@@ -3,6 +3,10 @@ services:
     build: .
     container_name: mergerow
     restart: unless-stopped
+    environment:
+      # Baserow instance the app proxies /api/ to. Override here (or with a
+      # .env file) to point at a different instance without rebuilding.
+      BASEROW_URL: https://baserow.home.tastymath.com
     networks:
       - traefik
     labels:
