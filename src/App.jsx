@@ -12,12 +12,14 @@ export default function App() {
   const [token, setToken] = useState('')
   const [tableId, setTableId] = useState('')
   const [fields, setFields] = useState([])
+  const [linkedTableInfo, setLinkedTableInfo] = useState({})
 
   // Step 2
   const [csvHeaders, setCsvHeaders] = useState([])
   const [csvRows, setCsvRows] = useState([])
   const [mapping, setMapping] = useState({})
   const [matchKeyFieldId, setMatchKeyFieldId] = useState('')
+  const [linkAutoCreate, setLinkAutoCreate] = useState({})
 
   // Step 3
   const [diffRows, setDiffRows] = useState([])
@@ -49,22 +51,28 @@ export default function App() {
                 if ('token' in changes) setToken(changes.token)
                 if ('tableId' in changes) setTableId(changes.tableId)
               }}
-              onConnected={({ fields: fieldList }) => setFields(fieldList)}
+              onConnected={({ fields: fieldList, linkedTableInfo: info }) => {
+                setFields(fieldList)
+                setLinkedTableInfo(info || {})
+              }}
             />
           )}
 
           {step === 2 && (
             <StepUploadMap
               fields={fields}
+              linkedTableInfo={linkedTableInfo}
               csvHeaders={csvHeaders}
               csvRows={csvRows}
               mapping={mapping}
               matchKeyFieldId={matchKeyFieldId}
+              linkAutoCreate={linkAutoCreate}
               onChange={(changes) => {
                 if ('csvHeaders' in changes) setCsvHeaders(changes.csvHeaders)
                 if ('csvRows' in changes) setCsvRows(changes.csvRows)
                 if ('mapping' in changes) setMapping(changes.mapping)
                 if ('matchKeyFieldId' in changes) setMatchKeyFieldId(changes.matchKeyFieldId)
+                if ('linkAutoCreate' in changes) setLinkAutoCreate(changes.linkAutoCreate)
               }}
             />
           )}
@@ -83,7 +91,13 @@ export default function App() {
           )}
 
           {step === 4 && (
-            <StepCommit token={token} tableId={tableId} diffRows={diffRows} />
+            <StepCommit
+              token={token}
+              tableId={tableId}
+              fields={fields}
+              diffRows={diffRows}
+              linkAutoCreate={linkAutoCreate}
+            />
           )}
 
           <div className="mt-8 flex justify-between border-t border-gray-100 pt-4">

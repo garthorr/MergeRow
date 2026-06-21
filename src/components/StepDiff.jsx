@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { fetchAllRows, fieldKey } from '../lib/baserow'
-import { buildDiff, findDuplicateBaserowKeys } from '../lib/diff'
+import { buildDiff, findDuplicateBaserowKeys, formatFieldValue } from '../lib/diff'
 
 const CATEGORY_STYLES = {
   new: 'bg-emerald-50',
@@ -16,8 +16,12 @@ const CATEGORY_LABELS = {
   missing: 'Missing',
 }
 
+function findField(fields, fieldId) {
+  return fields.find((f) => String(f.id) === String(fieldId))
+}
+
 function fieldName(fields, fieldId) {
-  const field = fields.find((f) => String(f.id) === String(fieldId))
+  const field = findField(fields, fieldId)
   return field ? field.name : fieldId
 }
 
@@ -44,7 +48,7 @@ export default function StepDiff({
         const baserowRows = await fetchAllRows(token, tableId)
         if (cancelled) return
         setDuplicateKeys(findDuplicateBaserowKeys(baserowRows, matchKeyFieldId))
-        const rows = buildDiff({ csvRows, mapping, matchKeyFieldId, baserowRows })
+        const rows = buildDiff({ csvRows, mapping, matchKeyFieldId, baserowRows, fields })
         setDiffRows(rows)
       } catch (err) {
         if (!cancelled) setError(err.message)
@@ -71,7 +75,12 @@ export default function StepDiff({
     )
   }
 
+  const setAllMissingDelete = (markDelete) => {
+    setDiffRows((rows) => rows.map((row) => (row.category === 'missing' ? { ...row, markDelete } : row)))
+  }
+
   const mappedFieldIds = Object.values(mapping).filter(Boolean)
+  const missingRows = diffRows.filter((row) => row.category === 'missing')
 
   if (loading) {
     return <p className="text-sm text-gray-500">Fetching existing rows from Baserow…</p>
@@ -97,13 +106,37 @@ export default function StepDiff({
         </div>
       )}
 
-      <div className="flex gap-4 text-xs">
-        {Object.entries(CATEGORY_LABELS).map(([key, label]) => (
-          <span key={key} className="flex items-center gap-1.5">
-            <span className={`h-3 w-3 rounded-sm border border-gray-300 ${CATEGORY_STYLES[key]}`} />
-            {label}
-          </span>
-        ))}
+      <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
+        <div className="flex gap-4">
+          {Object.entries(CATEGORY_LABELS).map(([key, label]) => (
+            <span key={key} className="flex items-center gap-1.5">
+              <span className={`h-3 w-3 rounded-sm border border-gray-300 ${CATEGORY_STYLES[key]}`} />
+              {label}
+            </span>
+          ))}
+        </div>
+
+        {missingRows.length > 0 && (
+          <div className="flex items-center gap-2 text-red-700">
+            <span>
+              {missingRows.length} missing row{missingRows.length === 1 ? '' : 's'}
+            </span>
+            <button
+              type="button"
+              onClick={() => setAllMissingDelete(true)}
+              className="rounded border border-red-300 px-2 py-0.5 font-medium hover:bg-red-100"
+            >
+              Select all for deletion
+            </button>
+            <button
+              type="button"
+              onClick={() => setAllMissingDelete(false)}
+              className="rounded border border-gray-300 px-2 py-0.5 font-medium text-gray-600 hover:bg-gray-100"
+            >
+              Clear all
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="overflow-auto rounded-md border border-gray-200 max-h-[28rem]">
@@ -155,14 +188,16 @@ export default function StepDiff({
                   ) : row.category === 'missing' ? (
                     <span className="text-xs text-gray-600">
                       {mappedFieldIds
-                        .map((fieldId) => row.baserowRow[fieldKey(fieldId)])
+                        .map((fieldId) =>
+                          formatFieldValue(findField(fields, fieldId), row.baserowRow[fieldKey(fieldId)]),
+                        )
                         .filter(Boolean)
                         .join(' · ')}
                     </span>
                   ) : (
                     <span className="text-xs text-gray-600">
                       {mappedFieldIds
-                        .map((fieldId) => row.fieldValues[fieldId])
+                        .map((fieldId) => formatFieldValue(findField(fields, fieldId), row.fieldValues[fieldId]))
                         .filter(Boolean)
                         .join(' · ')}
                     </span>

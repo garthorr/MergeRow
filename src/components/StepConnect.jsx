@@ -1,29 +1,45 @@
 import { useState } from 'react'
-import { fetchTableFields, fetchTableInfo } from '../lib/baserow'
+import { fetchTableFields, fetchAllTables, isLinkRowField } from '../lib/baserow'
 
 export default function StepConnect({ token, tableId, onChange, onConnected }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [fields, setFields] = useState(null)
-  const [tableName, setTableName] = useState('')
 
   const handleConnect = async () => {
     setError('')
     setFields(null)
-    setTableName('')
     if (!token || !tableId) {
       setError('Both an API token and a table ID are required.')
       return
     }
     setLoading(true)
     try {
-      const [tableInfo, fieldList] = await Promise.all([
-        fetchTableInfo(token, tableId),
-        fetchTableFields(token, tableId),
-      ])
+      // Database tokens are scoped to row/field data only — table metadata
+      // endpoints (like this table's own display name) require JWT/session
+      // auth. `all-tables/` is explicitly token-compatible though, so it can
+      // resolve the *other* tables that link_row fields point to.
+      const fieldList = await fetchTableFields(token, tableId)
+      const tables = await fetchAllTables(token)
+      const tableNameById = new Map(tables.map((t) => [t.id, t.name]))
+
+      const linkedTableIds = [
+        ...new Set(fieldList.filter(isLinkRowField).map((f) => f.link_row_table_id)),
+      ]
+      const linkedFieldLists = await Promise.all(
+        linkedTableIds.map((id) => fetchTableFields(token, id)),
+      )
+      const linkedTableInfo = {}
+      linkedTableIds.forEach((id, i) => {
+        const primaryField = linkedFieldLists[i].find((f) => f.primary)
+        linkedTableInfo[id] = {
+          name: tableNameById.get(id) || `Table ${id}`,
+          primaryFieldName: primaryField ? primaryField.name : 'primary field',
+        }
+      })
+
       setFields(fieldList)
-      setTableName(tableInfo.name)
-      onConnected({ table: tableInfo, fields: fieldList })
+      onConnected({ fields: fieldList, linkedTableInfo })
     } catch (err) {
       setError(err.message)
     } finally {
@@ -73,8 +89,7 @@ export default function StepConnect({ token, tableId, onChange, onConnected }) {
       {fields && (
         <div className="rounded-md bg-emerald-50 border border-emerald-200 px-4 py-3">
           <p className="text-sm font-medium text-emerald-800 mb-2">
-            Connected to <span className="font-semibold">{tableName}</span> — {fields.length} field
-            {fields.length === 1 ? '' : 's'} found
+            Connected — {fields.length} field{fields.length === 1 ? '' : 's'} found
           </p>
           <ul className="text-sm text-emerald-700 space-y-0.5">
             {fields.map((field) => (
@@ -83,6 +98,9 @@ export default function StepConnect({ token, tableId, onChange, onConnected }) {
               </li>
             ))}
           </ul>
+          <p className="mt-2 text-xs text-emerald-600">
+            Link-to-table fields will show which table and field they match against in Step 2.
+          </p>
         </div>
       )}
     </div>

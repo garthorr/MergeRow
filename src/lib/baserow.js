@@ -17,6 +17,27 @@ export function toApiFields(fieldValuesByFieldId) {
   return payload
 }
 
+// Field types that are server-computed and rejected by the API if written to.
+// (`link_row` used to be excluded here too, but Baserow's row-write API
+// accepts an array of primary-field text values for link fields — matched
+// against the linked table's rows — so it's safe to offer for mapping.)
+export const UNMAPPABLE_FIELD_TYPES = new Set([
+  'formula',
+  'lookup',
+  'count',
+  'rollup',
+  'created_on',
+  'last_modified',
+])
+
+export function isMappableField(field) {
+  return !UNMAPPABLE_FIELD_TYPES.has(field.type)
+}
+
+export function isLinkRowField(field) {
+  return field.type === 'link_row'
+}
+
 function authHeaders(token) {
   return {
     Authorization: `Token ${token}`,
@@ -33,22 +54,26 @@ async function parseErrorMessage(response) {
   }
 }
 
-export async function fetchTableInfo(token, tableId) {
-  const response = await fetch(`/api/database/tables/${tableId}/`, {
-    headers: authHeaders(token),
-  })
-  if (!response.ok) {
-    throw new Error(`Failed to fetch table: ${await parseErrorMessage(response)}`)
-  }
-  return response.json()
-}
-
 export async function fetchTableFields(token, tableId) {
   const response = await fetch(`/api/database/fields/table/${tableId}/`, {
     headers: authHeaders(token),
   })
   if (!response.ok) {
     throw new Error(`Failed to fetch fields: ${await parseErrorMessage(response)}`)
+  }
+  return response.json()
+}
+
+// Lists every table the token has access to, across all databases. Unlike
+// the single-table metadata endpoint, this one is explicitly documented as
+// token-compatible — it's how a link_row field's `link_row_table_id` gets
+// turned into a human-readable table name.
+export async function fetchAllTables(token) {
+  const response = await fetch('/api/database/tables/all-tables/', {
+    headers: authHeaders(token),
+  })
+  if (!response.ok) {
+    throw new Error(`Failed to fetch tables: ${await parseErrorMessage(response)}`)
   }
   return response.json()
 }

@@ -3,6 +3,10 @@ services:
     build: .
     container_name: mergerow
     restart: unless-stopped
+    environment:
+      # Baserow instance the app proxies /api/ to. Set in a local .env file
+      # (see .env.example) so the real URL never ends up in version control.
+      BASEROW_URL: ${BASEROW_URL:?Set BASEROW_URL in a .env file — see .env.example}
     networks:
       - traefik
     labels:

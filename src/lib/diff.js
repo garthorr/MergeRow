@@ -1,17 +1,53 @@
 // Builds a row-by-row diff between the parsed CSV and the rows currently in
 // the Baserow table, keyed by the user-chosen match key field.
 
-import { fieldKey } from './baserow'
+import { fieldKey, isLinkRowField } from './baserow'
 
 function normalize(value) {
   if (value === null || value === undefined) return ''
   return String(value).trim()
 }
 
+// CSV cells mapped to a link_row field are split on commas so a single
+// column can populate a multi-link relationship (e.g. "Alpha Co, Bravo Co").
+function splitLinkRowText(value) {
+  if (value === null || value === undefined) return []
+  return String(value)
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+}
+
+function namesEqual(a, b) {
+  if (a.length !== b.length) return false
+  const normA = a.map((s) => s.toLowerCase()).sort()
+  const normB = b.map((s) => s.toLowerCase()).sort()
+  return normA.every((v, i) => v === normB[i])
+}
+
+// Renders a field's value for display, whichever shape it's in: a plain CSV
+// string, an array of names (CSV side of a mapped link_row field), or
+// Baserow's API shape for link_row fields — an array of `{ id, value }`
+// objects where `value` is the linked row's primary-field text.
+export function formatFieldValue(field, rawValue) {
+  if (field && isLinkRowField(field) && Array.isArray(rawValue)) {
+    return rawValue
+      .map((item) => (item && typeof item === 'object' ? normalize(item.value) : normalize(item)))
+      .filter(Boolean)
+      .join(', ')
+  }
+  return normalize(rawValue)
+}
+
 // mapping: { [csvHeader]: fieldId }
 // matchKeyFieldId: fieldId used as the unique identifier
-export function buildDiff({ csvRows, mapping, matchKeyFieldId, baserowRows }) {
+// fields: the table's field schema, needed to know which mapped fields are
+// link_row fields (their CSV text and Baserow API values both need special
+// handling instead of a plain string comparison).
+export function buildDiff({ csvRows, mapping, matchKeyFieldId, baserowRows, fields = [] }) {
   const csvHeaders = Object.keys(mapping)
+  const fieldsById = new Map(fields.map((field) => [String(field.id), field]))
+  const isLinkField = (fieldId) => isLinkRowField(fieldsById.get(String(fieldId)) || {})
 
   // Deduped set of actually-mapped field IDs, computed once. Two CSV columns
   // can point at the same field, and unmapped columns carry an empty value;
@@ -22,7 +58,8 @@ export function buildDiff({ csvRows, mapping, matchKeyFieldId, baserowRows }) {
     const values = {}
     for (const header of csvHeaders) {
       const fieldId = mapping[header]
-      if (fieldId) values[fieldId] = csvRow[header]
+      if (!fieldId) continue
+      values[fieldId] = isLinkField(fieldId) ? splitLinkRowText(csvRow[header]) : csvRow[header]
     }
     return values
   }
@@ -57,8 +94,20 @@ export function buildDiff({ csvRows, mapping, matchKeyFieldId, baserowRows }) {
     const changes = {}
     let hasChange = false
     for (const fieldId of mappedFieldIds) {
+      const oldRawValue = baserowRow[fieldKey(fieldId)]
+      if (isLinkField(fieldId)) {
+        const newNames = fieldValues[fieldId]
+        const oldNames = Array.isArray(oldRawValue)
+          ? oldRawValue.map((item) => normalize(item && item.value))
+          : []
+        if (!namesEqual(newNames, oldNames)) {
+          hasChange = true
+          changes[fieldId] = { oldValue: oldNames.join(', '), newValue: newNames.join(', ') }
+        }
+        continue
+      }
       const newValue = normalize(fieldValues[fieldId])
-      const oldValue = normalize(baserowRow[fieldKey(fieldId)])
+      const oldValue = normalize(oldRawValue)
       if (newValue !== oldValue) {
         hasChange = true
         changes[fieldId] = { oldValue, newValue }

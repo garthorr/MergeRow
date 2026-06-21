@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { createRow, updateRow, deleteRow } from '../lib/baserow'
 import { summarizeDiff } from '../lib/diff'
+import { resolveLinkRowValues } from '../lib/linkResolve'
 
 const STATUS_STYLES = {
   pending: 'text-gray-400',
@@ -23,10 +24,12 @@ function buildActions(diffRows) {
   return actions
 }
 
-export default function StepCommit({ token, tableId, diffRows }) {
+export default function StepCommit({ token, tableId, fields, diffRows, linkAutoCreate = {} }) {
   const [statuses, setStatuses] = useState({})
   const [running, setRunning] = useState(false)
   const [done, setDone] = useState(false)
+  const [resolving, setResolving] = useState(false)
+  const [error, setError] = useState('')
 
   const summary = summarizeDiff(diffRows)
   const actions = buildActions(diffRows)
@@ -34,15 +37,32 @@ export default function StepCommit({ token, tableId, diffRows }) {
   const handleCommit = async () => {
     setRunning(true)
     setDone(false)
+    setError('')
     const initial = {}
     actions.forEach((_, i) => {
       initial[i] = 'pending'
     })
     setStatuses(initial)
 
-    for (let i = 0; i < actions.length; i += 1) {
-      const action = actions[i]
+    let resolvedActions
+    try {
+      setResolving(true)
+      resolvedActions = await resolveLinkRowValues(token, fields, actions, linkAutoCreate)
+    } catch (err) {
+      setError(`Failed to resolve linked rows: ${err.message}`)
+      setResolving(false)
+      setRunning(false)
+      return
+    }
+    setResolving(false)
+
+    for (let i = 0; i < resolvedActions.length; i += 1) {
+      const action = resolvedActions[i]
       setStatuses((prev) => ({ ...prev, [i]: 'running' }))
+      if (action.resolveError) {
+        setStatuses((prev) => ({ ...prev, [i]: 'error', [`${i}-error`]: action.resolveError }))
+        continue
+      }
       try {
         if (action.type === 'create') {
           await createRow(token, tableId, action.row.fieldValues)
@@ -82,6 +102,12 @@ export default function StepCommit({ token, tableId, diffRows }) {
         </div>
       </div>
 
+      {error && (
+        <div className="rounded-md bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+          {error}
+        </div>
+      )}
+
       {actions.length === 0 ? (
         <p className="text-sm text-gray-500">Nothing to commit — no rows are selected.</p>
       ) : (
@@ -90,7 +116,11 @@ export default function StepCommit({ token, tableId, diffRows }) {
           disabled={running}
           className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
         >
-          {running ? `Committing… (${completedCount}/${actions.length})` : 'Confirm & Commit'}
+          {resolving
+            ? 'Resolving linked rows…'
+            : running
+              ? `Committing… (${completedCount}/${actions.length})`
+              : 'Confirm & Commit'}
         </button>
       )}
 
