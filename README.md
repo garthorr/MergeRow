@@ -152,10 +152,18 @@ one cell to link a row to several rows in the other table.
 
 A few things to know about mapping a link field:
 
-- Baserow matches by exact text against the linked table's primary field.
-  It does **not** create a new row if the text doesn't match anything —
-  the write fails and that error surfaces per-row in Step 4, so a typo
-  never silently creates a duplicate Unit or Position.
+- Baserow's own API matches by exact text against the linked table's
+  primary field and does **not** create a new row if the text doesn't
+  match anything — the write just fails. MergeRow resolves link fields
+  itself before committing instead (see Step 4 above), so by default an
+  unmatched name gets created as a new row rather than failing the write.
+- Each mapped link field has its own "Auto-create missing rows" checkbox
+  in Step 2, on by default. Turn it off for a field where an unmatched
+  reference is more likely a typo or formatting mismatch than a real new
+  entry (e.g. a Contact link, where a phantom row is costlier than for a
+  small Unit/Position catalog) — with it off, an unmatched value fails
+  only the row(s) that reference it, surfaced as a per-row error in Step 4,
+  rather than creating a near-duplicate.
 - Link fields can't be used as the match key (Step 2's "unique identifier"
   dropdown), since a relationship is a set of linked rows, not a single
   scalar value.

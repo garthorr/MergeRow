@@ -20,7 +20,16 @@ function normalize(value) {
 // each link_row field's name array replaced by an array of row IDs — the
 // input is left untouched so the diff step's state isn't mutated underneath
 // the user's feet.
-export async function resolveLinkRowValues(token, fields, actions) {
+//
+// `autoCreateByFieldId` (keyed by field id, default true) controls whether a
+// name with no match gets created as a new linked row or fails. Disabling it
+// is for fields like a Contact link, where a typo'd reference should be
+// surfaced as an error rather than silently spawning a near-duplicate
+// contact — unlike a Unit/Position catalog, where new entries are expected.
+// A field with no match and auto-create disabled doesn't abort the whole
+// commit: only the action(s) referencing that value are marked failed via
+// `resolveError`, so unrelated rows still go through.
+export async function resolveLinkRowValues(token, fields, actions, autoCreateByFieldId = {}) {
   const fieldsById = new Map(fields.map((f) => [String(f.id), f]))
 
   const linkFieldIdsUsed = new Set()
@@ -64,10 +73,13 @@ export async function resolveLinkRowValues(token, fields, actions) {
     }
 
     // Each unique missing name should only be created once, even if it's
-    // referenced by many rows in this commit.
+    // referenced by many rows in this commit. Only collect names from fields
+    // that allow auto-create; a name only ever referenced by a strict field
+    // is left for the error path below.
     const pendingCreates = new Map()
     for (const { row } of resolved) {
       for (const fieldId of fieldIds) {
+        if (autoCreateByFieldId[fieldId] === false) continue
         const names = row.fieldValues?.[fieldId]
         if (!Array.isArray(names)) continue
         for (const name of names) {
@@ -83,10 +95,17 @@ export async function resolveLinkRowValues(token, fields, actions) {
       idByName.set(key, created.id)
     }
 
-    for (const { row } of resolved) {
+    for (const action of resolved) {
+      const { row } = action
       for (const fieldId of fieldIds) {
         const names = row.fieldValues?.[fieldId]
         if (!Array.isArray(names)) continue
+        const unmatched = names.filter((name) => normalize(name) && !idByName.has(normalize(name)))
+        if (unmatched.length > 0) {
+          const field = fieldsById.get(fieldId)
+          action.resolveError = `"${unmatched.join('", "')}" not found in linked table for "${field.name}" (row ${row.key}); auto-create is disabled for this field.`
+          continue
+        }
         row.fieldValues[fieldId] = names.map((name) => idByName.get(normalize(name)))
       }
     }

@@ -24,7 +24,7 @@ function buildActions(diffRows) {
   return actions
 }
 
-export default function StepCommit({ token, tableId, fields, diffRows }) {
+export default function StepCommit({ token, tableId, fields, diffRows, linkAutoCreate = {} }) {
   const [statuses, setStatuses] = useState({})
   const [running, setRunning] = useState(false)
   const [done, setDone] = useState(false)
@@ -47,7 +47,7 @@ export default function StepCommit({ token, tableId, fields, diffRows }) {
     let resolvedActions
     try {
       setResolving(true)
-      resolvedActions = await resolveLinkRowValues(token, fields, actions)
+      resolvedActions = await resolveLinkRowValues(token, fields, actions, linkAutoCreate)
     } catch (err) {
       setError(`Failed to resolve linked rows: ${err.message}`)
       setResolving(false)
@@ -59,6 +59,10 @@ export default function StepCommit({ token, tableId, fields, diffRows }) {
     for (let i = 0; i < resolvedActions.length; i += 1) {
       const action = resolvedActions[i]
       setStatuses((prev) => ({ ...prev, [i]: 'running' }))
+      if (action.resolveError) {
+        setStatuses((prev) => ({ ...prev, [i]: 'error', [`${i}-error`]: action.resolveError }))
+        continue
+      }
       try {
         if (action.type === 'create') {
           await createRow(token, tableId, action.row.fieldValues)

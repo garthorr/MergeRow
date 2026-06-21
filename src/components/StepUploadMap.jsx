@@ -24,6 +24,7 @@ export default function StepUploadMap({
   csvRows,
   mapping,
   matchKeyFieldId,
+  linkAutoCreate = {},
   onChange,
 }) {
   const [error, setError] = useState('')
@@ -61,6 +62,10 @@ export default function StepUploadMap({
 
   const handleMappingChange = (header, fieldId) => {
     onChange({ mapping: { ...mapping, [header]: fieldId } })
+  }
+
+  const handleAutoCreateChange = (fieldId, checked) => {
+    onChange({ linkAutoCreate: { ...linkAutoCreate, [fieldId]: checked } })
   }
 
   const mappedFieldIds = Object.values(mapping).filter(Boolean)
@@ -103,9 +108,11 @@ export default function StepUploadMap({
             Fields labeled <span className="font-medium">(link to …)</span> are relationships to
             another table — map a column to one to set links by name (comma-separate multiple
             names). The label shows which table and which field of that table the name has to
-            match. Matching is case/whitespace-insensitive, and a name with no match gets created
-            as a new row in the linked table at commit time. Leave a link field unmapped to keep
-            its existing links untouched.
+            match. Matching is case/whitespace-insensitive, and by default a name with no match
+            gets created as a new row in the linked table at commit time. Uncheck "Auto-create"
+            for a field (e.g. a Contact link) where an unmatched reference should fail that row
+            instead of creating a near-duplicate. Leave a link field unmapped to keep its existing
+            links untouched.
           </p>
           <div className="overflow-hidden rounded-md border border-gray-200">
             <table className="w-full text-sm">
@@ -116,25 +123,42 @@ export default function StepUploadMap({
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {csvHeaders.map((header) => (
-                  <tr key={header}>
-                    <td className="px-4 py-2 font-medium text-gray-800">{header}</td>
-                    <td className="px-4 py-2">
-                      <select
-                        value={mapping[header] || ''}
-                        onChange={(e) => handleMappingChange(header, e.target.value)}
-                        className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      >
-                        <option value="">— Do not map —</option>
-                        {mappableFields.map((field) => (
-                          <option key={field.id} value={field.id}>
-                            {isLinkRowField(field) ? linkFieldLabel(field, linkedTableInfo) : field.name}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                  </tr>
-                ))}
+                {csvHeaders.map((header) => {
+                  const mappedFieldId = mapping[header]
+                  const mappedField = mappedFieldId
+                    ? fields.find((f) => String(f.id) === String(mappedFieldId))
+                    : null
+                  const isLink = mappedField && isLinkRowField(mappedField)
+                  return (
+                    <tr key={header}>
+                      <td className="px-4 py-2 font-medium text-gray-800">{header}</td>
+                      <td className="px-4 py-2">
+                        <select
+                          value={mapping[header] || ''}
+                          onChange={(e) => handleMappingChange(header, e.target.value)}
+                          className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                          <option value="">— Do not map —</option>
+                          {mappableFields.map((field) => (
+                            <option key={field.id} value={field.id}>
+                              {isLinkRowField(field) ? linkFieldLabel(field, linkedTableInfo) : field.name}
+                            </option>
+                          ))}
+                        </select>
+                        {isLink && (
+                          <label className="mt-1 flex items-center gap-1.5 text-xs text-gray-500">
+                            <input
+                              type="checkbox"
+                              checked={linkAutoCreate[mappedFieldId] ?? true}
+                              onChange={(e) => handleAutoCreateChange(mappedFieldId, e.target.checked)}
+                            />
+                            Auto-create missing {linkedTableInfo[mappedField.link_row_table_id]?.name || 'linked'} rows
+                          </label>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>
