@@ -88,7 +88,7 @@ export default function App() {
           )}
 
           {step === 4 && (
-            <StepCommit token={token} tableId={tableId} diffRows={diffRows} />
+            <StepCommit token={token} tableId={tableId} fields={fields} diffRows={diffRows} />
           )}
 
           <div className="mt-8 flex justify-between border-t border-gray-100 pt-4">

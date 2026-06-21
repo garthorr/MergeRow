@@ -18,12 +18,37 @@ A 4-step wizard:
    the CSV by match key. Rows are categorized as **New**, **Changed**,
    **Unchanged**, or **Missing** (present in Baserow but absent from the
    CSV). Each row can be included/excluded from the commit; missing rows
-   require an explicit checkbox before they're queued for deletion.
+   require an explicit checkbox before they're queued for deletion (or use
+   "Select all for deletion" / "Clear all" to do that in bulk).
 4. **Commit** — review a summary of pending creates/updates/deletes, confirm,
-   and watch per-row progress as MergeRow calls the Baserow API.
+   and watch per-row progress as MergeRow calls the Baserow API. Any mapped
+   link-to-table column is resolved client-side first: a name is matched
+   case/whitespace-insensitively against the linked table's existing rows,
+   and if nothing matches, a new row is created there before the link is
+   written — this is different from Baserow's own API, which errors out
+   instead of creating the missing row.
 
 The API token is kept in React component state only — it is never written
 to `localStorage`, cookies, or any backend.
+
+## Syncing related tables (e.g. a Contacts ↔ Assignments join table)
+
+If your CSV export is itself a join table — each row links one record from
+table A to one from table B (for example a `Contact Assignments` export
+where each row references a `Contact` by email and a `Unit`/`Position` by
+name) — run the wizard once per CSV/table pair rather than trying to do it
+in one pass:
+
+1. Sync the "leaf" table(s) first (e.g. `Contacts.csv` → the Contacts
+   table), matched by a stable key like email. Leave any column that's
+   really just a reverse lookup of the join table unmapped — Baserow
+   derives it automatically once the join rows point at it.
+2. Sync the join-table CSV itself (e.g. `Contact_Assignments.csv` → the
+   Contact Assignments table) matched by its own stable key (e.g. an
+   `Assignment ID` column), mapping each relationship column to its
+   `link_row` field. New/changed/removed assignments fall out of the normal
+   diff categorization, and any Unit/Position name not yet in Baserow gets
+   created automatically as described above.
 
 ## Local development
 

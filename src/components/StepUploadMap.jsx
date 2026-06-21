@@ -103,8 +103,9 @@ export default function StepUploadMap({
             Fields labeled <span className="font-medium">(link to …)</span> are relationships to
             another table — map a column to one to set links by name (comma-separate multiple
             names). The label shows which table and which field of that table the name has to
-            match. A name with no match fails at commit time rather than creating a new row.
-            Leave a link field unmapped to keep its existing links untouched.
+            match. Matching is case/whitespace-insensitive, and a name with no match gets created
+            as a new row in the linked table at commit time. Leave a link field unmapped to keep
+            its existing links untouched.
           </p>
           <div className="overflow-hidden rounded-md border border-gray-200">
             <table className="w-full text-sm">
