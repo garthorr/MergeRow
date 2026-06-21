@@ -33,7 +33,11 @@ export const TABLE_SLOTS = {
     { key: 'firstName', label: 'First Name', synonyms: ['first name', 'first'] },
     { key: 'lastName', label: 'Last Name', synonyms: ['last name', 'last'] },
     { key: 'middleName', label: 'Middle Name', optional: true, synonyms: ['middle name', 'middle'] },
-    { key: 'fullName', label: 'Full / display Name', optional: true, synonyms: ['full name', 'name'] },
+    // Not auto-mapped: the live Contacts "Full Name" is a "Last, First" display
+    // field (often a formula); composing "First Middle Last" into it would flag
+    // every contact as Changed and clobber the format. Email is the key, so this
+    // is opt-in only — map it by hand if you really want to write it.
+    { key: 'fullName', label: 'Full / display Name', optional: true, noAuto: true, synonyms: ['full name'] },
   ],
   units: [
     { key: 'name', label: 'Unit Name (key)', isKey: true, synonyms: ['name', 'unit'] },
@@ -63,6 +67,7 @@ export function autoMapSlots(tableKey, fields) {
   const used = new Set()
   const map = {}
   for (const slot of slots) {
+    if (slot.noAuto) continue
     let field = null
     if (slot.link) {
       const links = fields.filter((f) => isLinkRowField(f) && !used.has(f.id))
