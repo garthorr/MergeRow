@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import Papa from 'papaparse'
-import { isMappableField } from '../lib/baserow'
+import { isMappableField, isLinkRowField } from '../lib/baserow'
 
 function autoMatch(headers, fields) {
   const mapping = {}
@@ -50,6 +50,12 @@ export default function StepUploadMap({ fields, csvHeaders, csvRows, mapping, ma
   }
 
   const mappedFieldIds = Object.values(mapping).filter(Boolean)
+  // A link_row field's value is a set of related rows, not a single scalar,
+  // so it can't double as the unique identifier the diff matches rows by.
+  const matchKeyCandidateIds = mappedFieldIds.filter((fieldId) => {
+    const field = fields.find((f) => String(f.id) === String(fieldId))
+    return field && !isLinkRowField(field)
+  })
 
   return (
     <div className="space-y-6">
@@ -75,11 +81,16 @@ export default function StepUploadMap({ fields, csvHeaders, csvRows, mapping, ma
           <p className="text-sm font-medium text-gray-700">Map CSV columns to Baserow fields</p>
           {skippedFields.length > 0 && (
             <p className="text-xs text-gray-500">
-              Not available for mapping: {skippedFields.map((f) => f.name).join(', ')}. Relationship
-              (link to table) and computed fields are never written to, so any existing links to
-              other tables are left intact.
+              Not available for mapping: {skippedFields.map((f) => f.name).join(', ')}. These are
+              computed by Baserow and can't be written to.
             </p>
           )}
+          <p className="text-xs text-gray-500">
+            Fields marked <span className="font-medium">(link to table)</span> are relationships —
+            map a column to one to set links by name (comma-separate multiple names). A name that
+            doesn't match an existing row in the linked table will fail at commit time rather than
+            create a new row. Leave a link field unmapped to keep its existing links untouched.
+          </p>
           <div className="overflow-hidden rounded-md border border-gray-200">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 text-left text-xs font-semibold text-gray-500 uppercase">
@@ -102,6 +113,7 @@ export default function StepUploadMap({ fields, csvHeaders, csvRows, mapping, ma
                         {mappableFields.map((field) => (
                           <option key={field.id} value={field.id}>
                             {field.name}
+                            {isLinkRowField(field) ? ' (link to table)' : ''}
                           </option>
                         ))}
                       </select>
@@ -122,7 +134,7 @@ export default function StepUploadMap({ fields, csvHeaders, csvRows, mapping, ma
               className="w-full max-w-sm rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               <option value="">— Select a field —</option>
-              {mappedFieldIds.map((fieldId) => {
+              {matchKeyCandidateIds.map((fieldId) => {
                 const field = fields.find((f) => String(f.id) === String(fieldId))
                 return (
                   <option key={fieldId} value={fieldId}>

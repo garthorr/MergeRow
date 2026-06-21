@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { fetchAllRows, fieldKey } from '../lib/baserow'
-import { buildDiff, findDuplicateBaserowKeys } from '../lib/diff'
+import { buildDiff, findDuplicateBaserowKeys, formatFieldValue } from '../lib/diff'
 
 const CATEGORY_STYLES = {
   new: 'bg-emerald-50',
@@ -16,8 +16,12 @@ const CATEGORY_LABELS = {
   missing: 'Missing',
 }
 
+function findField(fields, fieldId) {
+  return fields.find((f) => String(f.id) === String(fieldId))
+}
+
 function fieldName(fields, fieldId) {
-  const field = fields.find((f) => String(f.id) === String(fieldId))
+  const field = findField(fields, fieldId)
   return field ? field.name : fieldId
 }
 
@@ -44,7 +48,7 @@ export default function StepDiff({
         const baserowRows = await fetchAllRows(token, tableId)
         if (cancelled) return
         setDuplicateKeys(findDuplicateBaserowKeys(baserowRows, matchKeyFieldId))
-        const rows = buildDiff({ csvRows, mapping, matchKeyFieldId, baserowRows })
+        const rows = buildDiff({ csvRows, mapping, matchKeyFieldId, baserowRows, fields })
         setDiffRows(rows)
       } catch (err) {
         if (!cancelled) setError(err.message)
@@ -155,14 +159,16 @@ export default function StepDiff({
                   ) : row.category === 'missing' ? (
                     <span className="text-xs text-gray-600">
                       {mappedFieldIds
-                        .map((fieldId) => row.baserowRow[fieldKey(fieldId)])
+                        .map((fieldId) =>
+                          formatFieldValue(findField(fields, fieldId), row.baserowRow[fieldKey(fieldId)]),
+                        )
                         .filter(Boolean)
                         .join(' · ')}
                     </span>
                   ) : (
                     <span className="text-xs text-gray-600">
                       {mappedFieldIds
-                        .map((fieldId) => row.fieldValues[fieldId])
+                        .map((fieldId) => formatFieldValue(findField(fields, fieldId), row.fieldValues[fieldId]))
                         .filter(Boolean)
                         .join(' · ')}
                     </span>

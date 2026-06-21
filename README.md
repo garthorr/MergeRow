@@ -112,15 +112,33 @@ then open http://localhost:8080.
   mapped — any field you don't map (and Baserow's own row metadata) is left
   completely untouched.
 
-## Relationships (link-to-table fields) are preserved
+## Relationships (link-to-table fields)
 
-Step 2's field dropdown deliberately excludes `link_row` (relationship)
-fields, along with computed/read-only fields (formula, lookup, count,
-rollup, created/last-modified). You can never map a CSV column onto one.
+Step 2's field dropdown excludes computed/read-only fields (formula,
+lookup, count, rollup, created/last-modified) — you can never map a CSV
+column onto one. `link_row` (relationship) fields, however, *can* be
+mapped: a column whose text matches the linked table's primary field (e.g.
+a Unit or Position name) can be used to set that relationship directly from
+the import. Fields offering this are labeled **(link to table)** in the
+dropdown. Comma-separate multiple values in one cell to link a row to
+several rows in the other table.
 
-That matters because an `update` is a `PATCH` containing only the fields you
-mapped — Baserow leaves every other field on the row exactly as it was. So
-if, say, a Contact row is linked to a Position, and the new CSV shows that
-contact as otherwise unchanged, the contact↔position link is never part of
-the request and stays intact. The same is true for any field you simply
-choose not to map: it's just never sent.
+A few things to know about mapping a link field:
+
+- Baserow matches by exact text against the linked table's primary field.
+  It does **not** create a new row if the text doesn't match anything —
+  the write fails and that error surfaces per-row in Step 4, so a typo
+  never silently creates a duplicate Unit or Position.
+- Link fields can't be used as the match key (Step 2's "unique identifier"
+  dropdown), since a relationship is a set of linked rows, not a single
+  scalar value.
+- The Diff step (Step 3) compares link fields by the set of linked names,
+  ignoring order, so re-importing the same relationships in a different
+  order doesn't show up as a spurious change.
+
+For any field — link or otherwise — that you leave unmapped, the
+relationship-preservation guarantee still holds: an `update` is a `PATCH`
+containing only the fields you mapped, and Baserow leaves every other field
+on the row exactly as it was. So if a Contact row is linked to a Position
+and you don't map that link field, the contact↔position link is never part
+of the request and stays intact.
