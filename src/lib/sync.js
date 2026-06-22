@@ -206,6 +206,75 @@ function buildWritePayload(item, fields) {
   return payload
 }
 
+// position / unit for an assignment diff row, whichever side it came from.
+function makeAssignmentDisplay(t) {
+  const s = t.slots
+  const lv = (row, fid) => {
+    const a = fid && row.baserowRow ? row.baserowRow[fieldKey(fid)] : null
+    return Array.isArray(a) && a[0] ? a[0].value || '' : ''
+  }
+  return (row) =>
+    row.item
+      ? { unit: row.item.entity.unitName || '(district)', position: row.item.entity.positionName }
+      : { unit: lv(row, s.unit) || '(district)', position: lv(row, s.position) }
+}
+
+// Builds the assignment actions, pairing a create with a delete in the same
+// person+unit so a role change reads as one story ("Scoutmaster → Committee
+// Chair") across the two operations it really is. Paired actions are kept
+// adjacent; each still executes and reports its own status.
+function assignmentActions(t, rows) {
+  const disp = makeAssignmentDisplay(t)
+  const base = (row) => ({ tableKey: 'assignments', tableId: t.tableId, fields: t.fields, row })
+  const L = TABLE_LABELS.assignments
+
+  const creates = rows.filter((r) => r.category === 'new' && r.include)
+  const updates = rows.filter((r) => r.category === 'changed' && r.include)
+  const deletes = rows.filter((r) => r.category === 'missing' && r.markDelete)
+
+  const groupKey = (row) => row.key.split('|').slice(0, 2).join('|') // email | unit
+  const delsByGroup = new Map()
+  for (const d of deletes) {
+    const g = groupKey(d)
+    if (!delsByGroup.has(g)) delsByGroup.set(g, [])
+    delsByGroup.get(g).push(d)
+  }
+  const pairedDeleteFor = new Map()
+  const pairedDeletes = new Set()
+  for (const c of creates) {
+    const bucket = delsByGroup.get(groupKey(c))
+    if (bucket && bucket.length) {
+      const d = bucket.shift()
+      pairedDeleteFor.set(c, d)
+      pairedDeletes.add(d)
+    }
+  }
+
+  const out = []
+  for (const c of creates) {
+    const d = pairedDeleteFor.get(c)
+    if (d) {
+      const dc = disp(c)
+      const story = `${disp(d).position} → ${dc.position} · ${dc.unit}`
+      out.push({ ...base(c), type: 'create', payload: buildWritePayload(c.item, t.fields), label: `${L}: ${story} (create new)` })
+      out.push({ ...base(d), type: 'delete', payload: null, label: `${L}: ${story} (remove old)` })
+    } else {
+      const dc = disp(c)
+      out.push({ ...base(c), type: 'create', payload: buildWritePayload(c.item, t.fields), label: `${L}: create ${dc.position} · ${dc.unit}` })
+    }
+  }
+  for (const u of updates) {
+    const du = disp(u)
+    out.push({ ...base(u), type: 'update', payload: buildWritePayload(u.item, t.fields), label: `${L}: update ${du.position} · ${du.unit}` })
+  }
+  for (const d of deletes) {
+    if (pairedDeletes.has(d)) continue
+    const dd = disp(d)
+    out.push({ ...base(d), type: 'delete', payload: null, label: `${L}: remove ${dd.position} · ${dd.unit}` })
+  }
+  return out
+}
+
 // Flattens the selected diff rows into an ordered action list (creates/updates
 // for new/changed rows the user kept, deletes for missing rows checked for
 // deletion). Order follows TABLE_ORDER so dependencies are satisfied.
@@ -213,7 +282,12 @@ export function collectActions(plan, diffs) {
   const actions = []
   for (const tableKey of enabledTableKeys(plan)) {
     const t = plan.tables[tableKey]
-    for (const row of diffs[tableKey] || []) {
+    const rows = diffs[tableKey] || []
+    if (tableKey === 'assignments') {
+      actions.push(...assignmentActions(t, rows))
+      continue
+    }
+    for (const row of rows) {
       const base = { tableKey, tableId: t.tableId, fields: t.fields, row }
       if (row.category === 'new' && row.include) {
         actions.push({ ...base, type: 'create', payload: buildWritePayload(row.item, t.fields), label: `${TABLE_LABELS[tableKey]}: create ${row.item.label}` })
