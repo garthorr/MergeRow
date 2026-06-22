@@ -160,12 +160,18 @@ function linkValue(row, fid) {
 // Derives the same key the entity uses, from a Baserow row. For assignments
 // this reads the three link fields' primary-field text (Contact link's text is
 // the contact's Email — its Baserow primary field), matching the synthesized
-// `email | unit | position` triple.
-export function makeBaserowKeyOf(tableKey, slotMap) {
+// `email | unit | position` triple. When merging is off, contacts key on
+// `email | first last` so same-email rows stay distinct on both sides.
+export function makeBaserowKeyOf(tableKey, slotMap, { mergeByEmail = true } = {}) {
   if (tableKey === 'assignments') {
     const { contact, unit, position } = slotMap
     return (row) =>
       `${linkValue(row, contact)}|${linkValue(row, unit)}|${linkValue(row, position)}`
+  }
+  if (tableKey === 'contacts' && !mergeByEmail) {
+    const { email, firstName, lastName } = slotMap
+    const v = (row, fid) => norm(fid ? row[fieldKey(fid)] : '')
+    return (row) => `${v(row, email)}|${norm(`${v(row, firstName)} ${v(row, lastName)}`)}`
   }
   const keySlot = TABLE_SLOTS[tableKey].find((s) => s.isKey)
   const fid = slotMap[keySlot.key]
@@ -179,7 +185,7 @@ function enabledTableKeys(plan) {
   })
 }
 
-export function buildAllDiffs({ entities, plan, baserowRowsByTable }) {
+export function buildAllDiffs({ entities, plan, baserowRowsByTable, mergeByEmail = true }) {
   const diffs = {}
   for (const tableKey of enabledTableKeys(plan)) {
     const t = plan.tables[tableKey]
@@ -187,7 +193,7 @@ export function buildAllDiffs({ entities, plan, baserowRowsByTable }) {
     diffs[tableKey] = buildTableDiff({
       items,
       baserowRows: baserowRowsByTable[tableKey] || [],
-      baserowKeyOf: makeBaserowKeyOf(tableKey, t.slots),
+      baserowKeyOf: makeBaserowKeyOf(tableKey, t.slots, { mergeByEmail }),
       compareFieldIds: compareFieldIds(tableKey, t.slots),
       fields: t.fields,
     })

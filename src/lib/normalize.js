@@ -82,7 +82,13 @@ export function composeFullName({ firstName, middleName, lastName }) {
 
 // roleByHeader: { [csvHeader]: role }. Returns the four entity arrays plus a
 // list of data-quality warnings that should be surfaced but must not abort.
-export function normalizeRoster(csvRows, roleByHeader) {
+//
+// mergeByEmail (default true): collapse every row sharing an email into one
+// contact (keyed on email). When false, each distinct email+name is kept as a
+// separate contact (keyed `email | first last`) — so two people who share an
+// email aren't fused into one. Either way the conflict is reported as a
+// warning.
+export function normalizeRoster(csvRows, roleByHeader, { mergeByEmail = true } = {}) {
   const headerByRole = {}
   for (const [header, role] of Object.entries(roleByHeader)) {
     if (role && !headerByRole[role]) headerByRole[role] = header
@@ -94,6 +100,7 @@ export function normalizeRoster(csvRows, roleByHeader) {
   }
 
   const contacts = new Map()
+  const namesByEmail = new Map()
   const units = new Map()
   const positions = new Map()
   const assignments = new Map()
@@ -124,19 +131,19 @@ export function normalizeRoster(csvRows, roleByHeader) {
       continue
     }
 
-    if (!contacts.has(emailKey)) {
-      contacts.set(emailKey, {
-        key: emailKey,
+    const contactKey = mergeByEmail ? emailKey : `${emailKey}|${norm(`${firstName} ${lastName}`)}`
+    if (!contacts.has(contactKey)) {
+      contacts.set(contactKey, {
+        key: contactKey,
         email,
         firstName,
         middleName,
         lastName,
         fullName: displayName,
-        names: new Set(displayName ? [displayName] : []),
       })
-    } else if (displayName) {
-      contacts.get(emailKey).names.add(displayName)
     }
+    if (!namesByEmail.has(emailKey)) namesByEmail.set(emailKey, { email, names: new Set() })
+    if (displayName) namesByEmail.get(emailKey).names.add(displayName)
 
     // Blank unit is a valid district-level assignment — never materialize a
     // blank Unit row.
@@ -165,10 +172,10 @@ export function normalizeRoster(csvRows, roleByHeader) {
   }
 
   const warnings = []
-  for (const c of contacts.values()) {
-    const distinct = [...c.names]
+  for (const { email, names } of namesByEmail.values()) {
+    const distinct = [...names]
     if (distinct.length > 1) {
-      warnings.push({ type: 'email-name-conflict', email: c.email, names: distinct })
+      warnings.push({ type: 'email-name-conflict', email, names: distinct })
     }
   }
   if (collapsedAssignments > 0) {
