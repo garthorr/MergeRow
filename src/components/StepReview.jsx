@@ -42,8 +42,10 @@ function ChangeList({ table, changes }) {
 
 export default function StepReview({ token, plan, csvRows, roleByHeader, diffs, setDiffs }) {
   const [loading, setLoading] = useState(!diffs)
+  const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState('')
   const [dupAssignmentKeys, setDupAssignmentKeys] = useState([])
+  const [refreshedAt, setRefreshedAt] = useState(null)
 
   // Filters + bulk: which categories to show, a free-text query, and whether
   // same-email rows are merged into one contact. Unchanged is hidden by default.
@@ -62,6 +64,44 @@ export default function StepReview({ token, plan, csvRows, roleByHeader, diffs, 
     (k) => plan.tables[k].enabled && plan.tables[k].tableId && plan.tables[k].connected,
   )
 
+  const fetchRows = async () => {
+    const out = {}
+    await Promise.all(
+      activeKeys.map(async (k) => {
+        out[k] = await fetchAllRows(token, plan.tables[k].tableId)
+      }),
+    )
+    return out
+  }
+  const buildFromRows = (rows) => {
+    baserowRef.current = rows
+    if (rows.assignments && plan.tables.assignments.slots) {
+      setDupAssignmentKeys(
+        findDuplicateBaserowKeys(
+          rows.assignments,
+          makeBaserowKeyOf('assignments', plan.tables.assignments.slots),
+        ),
+      )
+    }
+    setDiffs(buildAllDiffs({ entities, plan, baserowRowsByTable: rows, mergeByEmail }))
+    setRefreshedAt(new Date())
+  }
+
+  // Re-pull the latest Baserow rows and rebuild the diff — picks up changes made
+  // in Baserow since the page loaded. Resets row selections, since the diff
+  // itself may change.
+  const refresh = async () => {
+    setRefreshing(true)
+    setError('')
+    try {
+      buildFromRows(await fetchRows())
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setRefreshing(false)
+    }
+  }
+
   useEffect(() => {
     if (diffs) return
     let cancelled = false
@@ -69,23 +109,9 @@ export default function StepReview({ token, plan, csvRows, roleByHeader, diffs, 
       setLoading(true)
       setError('')
       try {
-        const baserowRowsByTable = {}
-        await Promise.all(
-          activeKeys.map(async (k) => {
-            baserowRowsByTable[k] = await fetchAllRows(token, plan.tables[k].tableId)
-          }),
-        )
+        const rows = await fetchRows()
         if (cancelled) return
-        baserowRef.current = baserowRowsByTable
-        if (baserowRowsByTable.assignments && plan.tables.assignments.slots) {
-          setDupAssignmentKeys(
-            findDuplicateBaserowKeys(
-              baserowRowsByTable.assignments,
-              makeBaserowKeyOf('assignments', plan.tables.assignments.slots),
-            ),
-          )
-        }
-        setDiffs(buildAllDiffs({ entities, plan, baserowRowsByTable, mergeByEmail }))
+        buildFromRows(rows)
       } catch (err) {
         if (!cancelled) setError(err.message)
       } finally {
@@ -375,7 +401,18 @@ export default function StepReview({ token, plan, csvRows, roleByHeader, diffs, 
             placeholder="Filter by name, email, unit or position…"
             className="min-w-[14rem] flex-1 rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
+          <button
+            onClick={refresh}
+            disabled={refreshing}
+            title="Re-pull the latest rows from Baserow and rebuild the diff"
+            className="shrink-0 rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+          >
+            {refreshing ? 'Refreshing…' : '↻ Refresh'}
+          </button>
         </div>
+        {refreshedAt && (
+          <p className="text-[11px] text-gray-400">Baserow data as of {refreshedAt.toLocaleTimeString()}.</p>
+        )}
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <span className="text-gray-500">Show:</span>
           {CATS.map((c) => (

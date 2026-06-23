@@ -71,6 +71,17 @@ to `localStorage`, cookies, or any backend.
 - `src/lib/baserow.js` / `src/lib/linkResolve.js` — the Baserow REST wrapper
   (field-key/CRUD/paging) and the client-side link resolver.
 
+## Tests
+
+The tricky pure logic (normalize / diff / sync) is covered by a
+[Vitest](https://vitest.dev) suite — synthesized-key matching, merge on/off,
+date/boolean coercion, role-change pairing, and the commit preview:
+
+```bash
+npm test        # run once
+npm run test:watch
+```
+
 ## Local development
 
 ```bash
