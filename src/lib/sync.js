@@ -343,14 +343,74 @@ export async function commitAll(token, plan, diffs, onProgress) {
       if (onProgress) onProgress(idx, 'running')
       try {
         if (action.resolveError) throw new Error(action.resolveError)
-        if (action.type === 'create') await createRow(token, action.tableId, action.payload)
-        else if (action.type === 'update') await updateRow(token, action.tableId, action.row.baserowRow.id, action.payload)
-        else if (action.type === 'delete') await deleteRow(token, action.tableId, action.row.baserowRow.id)
-        if (onProgress) onProgress(idx, 'success')
+        if (action.type === 'create') {
+          const created = await createRow(token, action.tableId, action.payload)
+          if (onProgress) onProgress(idx, 'success', null, { id: created?.id })
+        } else if (action.type === 'update') {
+          await updateRow(token, action.tableId, action.row.baserowRow.id, action.payload)
+          if (onProgress) onProgress(idx, 'success', null, { id: action.row.baserowRow.id })
+        } else if (action.type === 'delete') {
+          await deleteRow(token, action.tableId, action.row.baserowRow.id)
+          if (onProgress) onProgress(idx, 'success', null, { id: action.row.baserowRow.id })
+        }
       } catch (err) {
         if (onProgress) onProgress(idx, 'error', err.message)
       }
     }
     i = j
   }
+}
+
+// Predicts each action's outcome WITHOUT writing, using only the diffs: which
+// linked rows already exist (have a Baserow row) or will be created this run
+// (new + included). Lets the Commit step offer a dry run and flag assignment
+// rows whose Contact/Unit/Position link won't resolve before anything is sent.
+function linkNameSets(plan, diffs) {
+  const collect = (tableKey, keyFn) => {
+    const set = new Set()
+    let present = false
+    if (plan.tables[tableKey]?.enabled && diffs[tableKey]) {
+      present = true
+      for (const row of diffs[tableKey]) {
+        if (row.baserowRow) set.add(keyFn(row))
+        else if (row.category === 'new' && row.include) set.add(keyFn(row))
+      }
+    }
+    return { set, present }
+  }
+  return {
+    contacts: collect('contacts', (r) => r.key.split('|')[0]),
+    units: collect('units', (r) => r.key),
+    positions: collect('positions', (r) => r.key),
+  }
+}
+
+export function previewCommit(plan, diffs) {
+  const actions = collectActions(plan, diffs)
+  const sets = linkNameSets(plan, diffs)
+  const ac = plan.tables.assignments?.autoCreate || {}
+
+  return actions.map((action) => {
+    if (action.tableKey !== 'assignments' || action.type === 'delete') {
+      return { action, status: 'ok', notes: [] }
+    }
+    const e = action.row.item.entity
+    const notes = []
+    let status = 'ok'
+    const check = (name, kind, autoOn, label) => {
+      const key = norm(name)
+      if (!key) return
+      const { set, present } = sets[kind]
+      if (!present || set.has(key)) return // resolves against existing/just-created, or table not synced
+      if (autoOn) notes.push(`${label} "${name}" will be auto-created`)
+      else {
+        notes.push(`${label} "${name}" not found — row will fail`)
+        status = 'fail'
+      }
+    }
+    check(e.email, 'contacts', ac.contact === true, 'contact')
+    check(e.unitName, 'units', ac.unit !== false, 'unit')
+    check(e.positionName, 'positions', ac.position !== false, 'position')
+    return { action, status, notes }
+  })
 }

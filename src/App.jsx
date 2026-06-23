@@ -79,7 +79,14 @@ export default function App() {
           <Stepper currentStep={step} />
 
           {step === 1 && (
-            <StepConnect token={token} setToken={setToken} plan={plan} updateTable={updateTable} />
+            <StepConnect
+              token={token}
+              setToken={setToken}
+              plan={plan}
+              updateTable={updateTable}
+              roleByHeader={roleByHeader}
+              setRoleByHeader={setRoleByHeader}
+            />
           )}
 
           {step === 2 && (

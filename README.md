@@ -30,10 +30,12 @@ you choose which of them to sync on any given run:
 
 A 4-step wizard:
 
-1. **Connect** — enter a Baserow API token and the Table ID for each table you
-   want to sync (uncheck any to skip). MergeRow fetches each table's field
-   schema and detects its primary field (the Contact link resolves against
-   Contacts' primary field — ideally Email).
+1. **Connect** — enter a Baserow API token, then **Load tables** to pick each
+   role's table by name (or type Table IDs directly); uncheck any to skip.
+   MergeRow fetches each table's field schema and detects its primary field
+   (the Contact link resolves against Contacts' primary field — ideally Email).
+   Table choices and mappings can be saved as a named **profile** (in
+   `localStorage`) for the next run — the token is never part of it.
 2. **Map** — upload the roster CSV (parsed client-side with PapaParse). Its
    columns are auto-assigned to roles (Email, Unit, Position, …), and each
    table's fields are auto-mapped from those roles. Per-link **"Auto-create
@@ -49,7 +51,11 @@ A 4-step wizard:
 4. **Commit** — one action, ordered by the tool: Contacts, Units and Positions
    first, then Contact Assignments, whose Contact/Unit/Position links are
    resolved (case/whitespace-insensitively) against the rows that were just
-   written. Watch per-action progress as MergeRow calls the Baserow API.
+   written. A **dry run** predicts every action's outcome — including
+   assignment rows whose Contact link won't resolve — without writing, and a
+   preflight banner flags those before you commit. Watch per-action progress as
+   MergeRow calls the Baserow API, then **download a CSV report** of every
+   create/update/delete with its status, error, and resulting row ID.
 
 The API token is kept in React component state only — it is never written
 to `localStorage`, cookies, or any backend.
