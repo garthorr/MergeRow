@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { autoMapSlots, makeBaserowKeyOf, collectActions, previewCommit } from './sync'
+import { autoMapSlots, makeBaserowKeyOf, collectActions, previewCommit, buildAllDiffs } from './sync'
 
 describe('autoMapSlots', () => {
   it('maps Contacts by name, falls back to primary for the key, and never auto-maps Full Name', () => {
@@ -94,6 +94,38 @@ describe('collectActions role-change pairing', () => {
     expect(labels[0]).toBe('create:Contact Assignments: Scoutmaster → Committee Chair · Pack 0084 (create new)')
     expect(labels[1]).toBe('delete:Contact Assignments: Scoutmaster → Committee Chair · Pack 0084 (remove old)')
     expect(labels[2]).toBe('create:Contact Assignments: create Den Leader · Troop 0042')
+  })
+})
+
+describe('buildAllDiffs scope annotation', () => {
+  it('marks Missing assignments in vs out of the roster unit scope', () => {
+    const entities = {
+      contacts: [{ key: 'a@x.org', email: 'a@x.org', firstName: 'A', lastName: 'B', fullName: 'A B' }],
+      units: [{ key: 'pack 0084', name: 'Pack 0084' }],
+      positions: [{ key: 'cubmaster', name: 'Cubmaster' }],
+      assignments: [
+        { key: 'a@x.org|pack 0084|cubmaster', email: 'a@x.org', unitName: 'Pack 0084', positionName: 'Cubmaster', program: '', directContactLeader: 'NO', regExpDate: '' },
+      ],
+    }
+    const plan = {
+      tables: {
+        contacts: off, units: off, positions: off,
+        assignments: { enabled: true, tableId: '9', fields: linkFields, slots: { contact: '12', unit: '13', position: '14' }, autoCreate: {} },
+      },
+    }
+    const link = (v) => [{ value: v }]
+    const baserowRowsByTable = {
+      assignments: [
+        { id: 1, field_12: link('a@x.org'), field_13: link('Pack 0084'), field_14: link('Cubmaster') }, // matches roster -> unchanged
+        { id: 2, field_12: link('a@x.org'), field_13: link('Pack 0084'), field_14: link('Den Leader') }, // missing, unit in scope
+        { id: 3, field_12: link('a@x.org'), field_13: link('Club 1881'), field_14: link('Associate') }, // missing, unit out of scope
+      ],
+    }
+    const diffs = buildAllDiffs({ entities, plan, baserowRowsByTable })
+    const missing = diffs.assignments.filter((r) => r.category === 'missing')
+    const byPos = Object.fromEntries(missing.map((r) => [r.key.split('|')[2], r.inScope]))
+    expect(byPos['den leader']).toBe(true)
+    expect(byPos['associate']).toBe(false)
   })
 })
 

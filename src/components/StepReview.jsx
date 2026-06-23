@@ -52,6 +52,9 @@ export default function StepReview({ token, plan, csvRows, roleByHeader, diffs, 
   const [showCats, setShowCats] = useState({ new: true, changed: true, missing: true, unchanged: false })
   const [query, setQuery] = useState('')
   const [mergeByEmail, setMergeByEmail] = useState(true)
+  // Partial-export safety: only treat Missing rows the roster actually covers as
+  // deletion candidates. On by default — this roster is a district subset.
+  const [scopeDeletes, setScopeDeletes] = useState(true)
 
   // Cache the fetched Baserow rows so toggling Merge re-diffs without refetching.
   const baserowRef = useRef(null)
@@ -131,6 +134,27 @@ export default function StepReview({ token, plan, csvRows, roleByHeader, diffs, 
     setDiffs(buildAllDiffs({ entities, plan, baserowRowsByTable: baserowRef.current, mergeByEmail }))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mergeByEmail])
+
+  // Turning scope limiting on clears any deletion marks now out of scope.
+  useEffect(() => {
+    if (!scopeDeletes) return
+    setDiffs((prev) => {
+      if (!prev) return prev
+      let changed = false
+      const next = {}
+      for (const tk of Object.keys(prev)) {
+        next[tk] = prev[tk].map((r) => {
+          if (r.category === 'missing' && r.inScope === false && r.markDelete) {
+            changed = true
+            return { ...r, markDelete: false }
+          }
+          return r
+        })
+      }
+      return changed ? next : prev
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scopeDeletes])
 
   const toggleInclude = (tableKey, index) =>
     setDiffs((prev) => ({
@@ -247,13 +271,24 @@ export default function StepReview({ token, plan, csvRows, roleByHeader, diffs, 
   const visibleEmails = new Set(shownPeople.map((p) => p.email))
 
   const labelText = (row) => (row.item?.label || row.key || '').toLowerCase()
-  const inScope = (tableKey, row) => {
+  // Whether a row is currently shown (passes category + text filters).
+  const shown = (tableKey, row) => {
     if (!catActive(row.category)) return false
     if (tableKey === 'contacts' || tableKey === 'assignments') {
       return visibleEmails.has(row.key.split('|')[0])
     }
     return !q || labelText(row).includes(q)
   }
+  // Whether a Missing row may be deleted: out-of-roster-scope rows are protected
+  // when scope limiting is on.
+  const deletable = (row) => !scopeDeletes || row.inScope !== false
+
+  const outOfScopeCount = scopeDeletes
+    ? Object.values(diffs).reduce(
+        (n, rows) => n + rows.filter((r) => r.category === 'missing' && r.inScope === false).length,
+        0,
+      )
+    : 0
 
   // Bulk toggles, scoped to the rows currently shown (filters compose).
   const bulkInclude = (value) =>
@@ -261,7 +296,7 @@ export default function StepReview({ token, plan, csvRows, roleByHeader, diffs, 
       const next = { ...prev }
       for (const tk of Object.keys(prev)) {
         next[tk] = prev[tk].map((row) =>
-          (row.category === 'new' || row.category === 'changed') && inScope(tk, row)
+          (row.category === 'new' || row.category === 'changed') && shown(tk, row)
             ? { ...row, include: value }
             : row,
         )
@@ -273,11 +308,29 @@ export default function StepReview({ token, plan, csvRows, roleByHeader, diffs, 
       const next = { ...prev }
       for (const tk of Object.keys(prev)) {
         next[tk] = prev[tk].map((row) =>
-          row.category === 'missing' && inScope(tk, row) ? { ...row, markDelete: value } : row,
+          row.category === 'missing' && shown(tk, row) && deletable(row)
+            ? { ...row, markDelete: value }
+            : row,
         )
       }
       return next
     })
+
+  // Reused for every Missing row's delete control / out-of-scope tag.
+  const missingControl = (tableKey, index, row) =>
+    deletable(row) ? (
+      <label className="flex shrink-0 items-center gap-1.5 text-xs text-red-700">
+        <input type="checkbox" checked={row.markDelete} onChange={() => toggleDelete(tableKey, index)} />
+        Delete
+      </label>
+    ) : (
+      <span
+        className="shrink-0 text-[11px] text-gray-400"
+        title="This unit/contact/position isn't in the roster — protected from deletion by scope limiting"
+      >
+        out of scope
+      </span>
+    )
 
   const conflictEmails = new Set(
     entities.warnings.filter((w) => w.type === 'email-name-conflict').map((w) => w.email.toLowerCase()),
@@ -315,10 +368,7 @@ export default function StepReview({ token, plan, csvRows, roleByHeader, diffs, 
                   {row.category === 'changed' && <ChangeList table={table} changes={row.changes} />}
                 </div>
                 {row.category === 'missing' ? (
-                  <label className="flex shrink-0 items-center gap-1.5 text-xs text-red-700">
-                    <input type="checkbox" checked={row.markDelete} onChange={() => toggleDelete(tableKey, index)} />
-                    Delete
-                  </label>
+                  missingControl(tableKey, index, row)
                 ) : row.category !== 'unchanged' ? (
                   <input type="checkbox" className="mt-1" checked={row.include} onChange={() => toggleInclude(tableKey, index)} />
                 ) : null}
@@ -338,10 +388,7 @@ export default function StepReview({ token, plan, csvRows, roleByHeader, diffs, 
         {c.row.category === 'changed' && <ChangeList table={plan.tables.contacts} changes={c.row.changes} />}
       </div>
       {c.row.category === 'missing' ? (
-        <label className="flex shrink-0 items-center gap-1.5 text-xs text-red-700">
-          <input type="checkbox" checked={c.row.markDelete} onChange={() => toggleDelete('contacts', c.index)} />
-          Delete
-        </label>
+        missingControl('contacts', c.index, c.row)
       ) : c.row.category !== 'unchanged' ? (
         <input type="checkbox" className="mt-0.5" checked={c.row.include} onChange={() => toggleInclude('contacts', c.index)} />
       ) : null}
@@ -442,6 +489,18 @@ export default function StepReview({ token, plan, csvRows, roleByHeader, diffs, 
             Clear deletions
           </button>
         </div>
+        <div className="flex flex-wrap items-center gap-2 border-t border-gray-100 pt-2 text-xs">
+          <label className="flex items-center gap-1.5 text-gray-700">
+            <input type="checkbox" checked={scopeDeletes} onChange={(e) => setScopeDeletes(e.target.checked)} />
+            Limit deletions to roster scope
+          </label>
+          <span className="text-gray-400">
+            scope = {entities.units.length} unit{entities.units.length === 1 ? '' : 's'}
+            {scopeDeletes && outOfScopeCount > 0
+              ? ` · ${outOfScopeCount} missing row${outOfScopeCount === 1 ? '' : 's'} protected (out of scope)`
+              : ''}
+          </span>
+        </div>
       </div>
 
       {/* Summary */}
@@ -518,14 +577,18 @@ export default function StepReview({ token, plan, csvRows, roleByHeader, diffs, 
                                 />
                                 create new
                               </label>
-                              <label className="flex items-center gap-1 text-red-700">
-                                <input
-                                  type="checkbox"
-                                  checked={view.oldEntry.row.markDelete}
-                                  onChange={() => toggleDelete('assignments', view.oldEntry.index)}
-                                />
-                                remove old
-                              </label>
+                              {deletable(view.oldEntry.row) ? (
+                                <label className="flex items-center gap-1 text-red-700">
+                                  <input
+                                    type="checkbox"
+                                    checked={view.oldEntry.row.markDelete}
+                                    onChange={() => toggleDelete('assignments', view.oldEntry.index)}
+                                  />
+                                  remove old
+                                </label>
+                              ) : (
+                                <span className="text-[11px] text-gray-400">old out of scope</span>
+                              )}
                             </div>
                           </li>
                         )
@@ -542,10 +605,7 @@ export default function StepReview({ token, plan, csvRows, roleByHeader, diffs, 
                             </span>
                           </div>
                           {row.category === 'missing' ? (
-                            <label className="flex shrink-0 items-center gap-1.5 text-xs text-red-700">
-                              <input type="checkbox" checked={row.markDelete} onChange={() => toggleDelete('assignments', index)} />
-                              Delete
-                            </label>
+                            missingControl('assignments', index, row)
                           ) : row.category !== 'unchanged' ? (
                             <input type="checkbox" className="mt-1" checked={row.include} onChange={() => toggleInclude('assignments', index)} />
                           ) : null}

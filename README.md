@@ -47,7 +47,12 @@ A 4-step wizard:
    so "moved from Den Leader to Cubmaster" reads as one story even though it's a
    delete + create underneath. Data-quality issues are surfaced as warnings
    (e.g. the same email on two different names) without breaking the run.
-   Missing rows need an explicit per-row delete check, with bulk select/clear.
+   Missing rows need an explicit per-row delete check, with bulk select/clear,
+   category/text **filters**, an optional **same-email merge** toggle, and a
+   **Refresh** button to re-pull Baserow. Because a roster is often a partial
+   export, **"Limit deletions to roster scope"** (on by default) protects any
+   Missing row for a unit/contact/position the roster never mentions — only
+   genuine removals within covered units stay deletable.
 4. **Commit** — one action, ordered by the tool: Contacts, Units and Positions
    first, then Contact Assignments, whose Contact/Unit/Position links are
    resolved (case/whitespace-insensitively) against the rows that were just
@@ -168,6 +173,11 @@ then open http://localhost:8080.
 - Updates are sent as `PATCH` requests that only include the fields you've
   mapped — any field you don't map (and Baserow's own row metadata) is left
   completely untouched.
+- Field values are coerced to the shape Baserow expects for each field type:
+  booleans (`YES`/`NO`↔`true`/`false`), dates (`M/D/YYYY`→ISO), and
+  single/multiple-**select** fields, where the option's **id** is written (the
+  data API keys options by id, not text). A select value that matches no option
+  is left untouched rather than blanked.
 
 ## Relationships (link-to-table fields)
 

@@ -1,5 +1,22 @@
 import { describe, it, expect } from 'vitest'
-import { toBool, toISODate, coerceForCompare, buildTableDiff, summarizeDiff } from './diff'
+import { toBool, toISODate, coerceForCompare, coerceForWrite, buildTableDiff, summarizeDiff } from './diff'
+
+describe('single-select coercion', () => {
+  const field = {
+    type: 'single_select',
+    select_options: [{ id: 71, value: 'Cub Scouting' }, { id: 72, value: 'Scouts BSA' }],
+  }
+  it('writes the matching option id (not the text)', () => {
+    expect(coerceForWrite(field, 'Scouts BSA')).toBe(72)
+    expect(coerceForWrite(field, 'scouts bsa')).toBe(72) // case-insensitive
+  })
+  it('leaves the field untouched when no option matches', () => {
+    expect(coerceForWrite(field, 'Sea Scouts')).toBeUndefined()
+  })
+  it('compares roster text against the Baserow {id,value} shape', () => {
+    expect(coerceForCompare(field, 'Cub Scouting')).toBe(coerceForCompare(field, { id: 71, value: 'Cub Scouting' }))
+  })
+})
 
 describe('value coercion', () => {
   it('normalizes booleans across YES/NO and true/false', () => {

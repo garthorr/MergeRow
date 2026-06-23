@@ -185,18 +185,47 @@ function enabledTableKeys(plan) {
   })
 }
 
+// The roster's coverage, used to mark which Missing rows are "in scope" — i.e.
+// genuinely removed from something the roster covers — versus untouched
+// territory (a unit/contact/position the roster never mentions). A partial
+// export shouldn't propose deleting the latter.
+export function rosterScope(entities) {
+  return {
+    units: new Set((entities.units || []).map((u) => u.key)),
+    positions: new Set((entities.positions || []).map((p) => p.key)),
+    emails: new Set((entities.contacts || []).map((c) => c.key.split('|')[0])),
+    hasDistrict: (entities.assignments || []).some((a) => a.key.split('|')[1] === ''),
+  }
+}
+
+function missingInScope(tableKey, row, scope) {
+  if (tableKey === 'assignments') {
+    const unitKey = row.key.split('|')[1]
+    return unitKey ? scope.units.has(unitKey) : scope.hasDistrict
+  }
+  if (tableKey === 'units') return scope.units.has(row.key)
+  if (tableKey === 'positions') return scope.positions.has(row.key)
+  if (tableKey === 'contacts') return scope.emails.has(row.key.split('|')[0])
+  return true
+}
+
 export function buildAllDiffs({ entities, plan, baserowRowsByTable, mergeByEmail = true }) {
   const diffs = {}
+  const scope = rosterScope(entities)
   for (const tableKey of enabledTableKeys(plan)) {
     const t = plan.tables[tableKey]
     const items = buildItems(tableKey, entities[tableKey] || [], t.slots)
-    diffs[tableKey] = buildTableDiff({
+    const rows = buildTableDiff({
       items,
       baserowRows: baserowRowsByTable[tableKey] || [],
       baserowKeyOf: makeBaserowKeyOf(tableKey, t.slots, { mergeByEmail }),
       compareFieldIds: compareFieldIds(tableKey, t.slots),
       fields: t.fields,
     })
+    for (const row of rows) {
+      if (row.category === 'missing') row.inScope = missingInScope(tableKey, row, scope)
+    }
+    diffs[tableKey] = rows
   }
   return diffs
 }
@@ -207,7 +236,14 @@ function buildWritePayload(item, fields) {
   for (const [fid, val] of Object.entries(item.values)) {
     const field = fieldsById.get(String(fid))
     if (!field) continue
-    payload[fid] = isLinkRowField(field) ? val : coerceForWrite(field, val)
+    if (isLinkRowField(field)) {
+      payload[fid] = val
+      continue
+    }
+    const coerced = coerceForWrite(field, val)
+    // `undefined` => leave the field untouched (e.g. a select value that
+    // matches no option), so PATCH never blanks it.
+    if (coerced !== undefined) payload[fid] = coerced
   }
   return payload
 }

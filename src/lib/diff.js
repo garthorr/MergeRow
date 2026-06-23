@@ -34,6 +34,27 @@ export function toISODate(value) {
 }
 
 // Normalizes a scalar value to a comparable string honoring the field's type,
+// Extracts the display text from a select value, whichever shape it's in:
+// Baserow's `{ id, value }` (single), an array of those (multiple), or a plain
+// string (the roster side).
+export function selectText(value) {
+  if (value === null || value === undefined) return ''
+  if (Array.isArray(value)) return value.map(selectText).filter(Boolean).join(', ')
+  if (typeof value === 'object') return value.value == null ? '' : String(value.value).trim()
+  return String(value).trim()
+}
+
+// Finds the option on a single/multiple-select field whose text matches `value`
+// (case/whitespace-insensitively). Baserow's row-write API with
+// user_field_names=false expects the option *id*, not the text.
+export function findSelectOption(field, value) {
+  const opts = field && field.select_options
+  if (!Array.isArray(opts)) return null
+  const target = norm(value && typeof value === 'object' ? value.value : value)
+  if (!target) return null
+  return opts.find((o) => norm(o.value) === target) || null
+}
+
 // so e.g. "YES" vs a boolean `true`, or "1/31/2027" vs "2027-01-31", don't
 // register as spurious changes.
 export function coerceForCompare(field, value) {
@@ -41,13 +62,24 @@ export function coerceForCompare(field, value) {
   const t = field && field.type
   if (t === 'boolean') return toBool(value) ? 'true' : 'false'
   if (t === 'date') return toISODate(value)
+  if (t === 'single_select') return norm(selectText(value))
+  if (t === 'multiple_select') {
+    return selectText(value)
+      .split(',')
+      .map((s) => norm(s))
+      .filter(Boolean)
+      .sort()
+      .join('|')
+  }
   if (typeof value === 'object') return ''
   return String(value).trim().toLowerCase()
 }
 
 // Coerces a value into the shape Baserow's write API expects for the field's
 // type. Link fields are handled separately (resolved to row IDs in
-// linkResolve.js) and never passed here.
+// linkResolve.js) and never passed here. Returns `undefined` to mean "leave
+// this field alone" — used when a select value matches no option, so we never
+// blank an existing value just because the roster text doesn't map.
 export function coerceForWrite(field, value) {
   const t = field && field.type
   if (t === 'boolean') return toBool(value)
@@ -55,6 +87,17 @@ export function coerceForWrite(field, value) {
   if (t === 'number') {
     const n = Number(value)
     return Number.isFinite(n) ? n : null
+  }
+  if (t === 'single_select') {
+    const opt = findSelectOption(field, value)
+    return opt ? opt.id : undefined
+  }
+  if (t === 'multiple_select') {
+    const ids = splitLinkRowText(value)
+      .map((name) => findSelectOption(field, name))
+      .filter(Boolean)
+      .map((o) => o.id)
+    return ids.length ? ids : undefined
   }
   if (value === null || value === undefined) return ''
   return String(value).trim()
@@ -88,6 +131,9 @@ export function formatFieldValue(field, rawValue) {
   }
   if (field && field.type === 'date') return toISODate(rawValue)
   if (field && field.type === 'boolean') return toBool(rawValue) ? 'YES' : 'NO'
+  if (field && (field.type === 'single_select' || field.type === 'multiple_select')) {
+    return selectText(rawValue)
+  }
   if (rawValue === null || rawValue === undefined) return ''
   if (typeof rawValue === 'object') return ''
   return String(rawValue).trim()

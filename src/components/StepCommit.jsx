@@ -30,6 +30,9 @@ export default function StepCommit({ token, plan, diffs }) {
   const [running, setRunning] = useState(false)
   const [done, setDone] = useState(false)
   const [showPreview, setShowPreview] = useState(false)
+  const [confirmDeletes, setConfirmDeletes] = useState(false)
+
+  const DELETE_CONFIRM_THRESHOLD = 25
 
   const previewRows = useMemo(() => (diffs ? previewCommit(plan, diffs) : []), [plan, diffs])
   const actions = previewRows.map((p) => p.action)
@@ -40,6 +43,9 @@ export default function StepCommit({ token, plan, diffs }) {
   }, {})
   const willFail = previewRows.filter((p) => p.status === 'fail').length
   const willAutoCreate = previewRows.filter((p) => p.status === 'ok' && p.notes.length > 0).length
+  const deleteCount = counts.delete || 0
+  const needsDeleteConfirm = deleteCount >= DELETE_CONFIRM_THRESHOLD
+  const commitBlocked = running || (needsDeleteConfirm && !confirmDeletes)
 
   const handleCommit = async () => {
     setRunning(true)
@@ -115,6 +121,21 @@ export default function StepCommit({ token, plan, diffs }) {
         </div>
       )}
 
+      {needsDeleteConfirm && !done && (
+        <label className="flex items-start gap-2 rounded-md bg-red-50 border border-red-200 px-4 py-2 text-sm text-red-800">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={confirmDeletes}
+            onChange={(e) => setConfirmDeletes(e.target.checked)}
+          />
+          <span>
+            This commit deletes <span className="font-semibold">{deleteCount}</span> rows. I've reviewed them and want
+            to proceed.
+          </span>
+        </label>
+      )}
+
       {actions.length === 0 ? (
         <p className="text-sm text-gray-500">Nothing to commit — no rows are selected.</p>
       ) : (
@@ -128,7 +149,7 @@ export default function StepCommit({ token, plan, diffs }) {
           </button>
           <button
             onClick={handleCommit}
-            disabled={running}
+            disabled={commitBlocked}
             className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
           >
             {running ? `Committing… (${completed}/${actions.length})` : 'Confirm & Commit'}
